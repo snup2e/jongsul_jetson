@@ -3,18 +3,56 @@
 ## 프로젝트 목표
 원본 Terra 레포지토리 (MATLAB 기반 발걸음 분류 연구 코드)를 **Python으로 포팅**하여 **Jetson Nano P3450**에서 **실시간 추론**을 수행한다. 원작자의 데이터 처리 파이프라인을 정확히 재현하는 것이 1차 목표.
 
-## 현재 단계: 센서 도착 대기 / 병행 작업 진행 (2026-05-01 갱신)
-**Stage 1~5d + 다중 인원 voter (5e) + 웹 대시보드 (7) 모두 PASS.** raw .mat → GMM → CWT(cwt_fast) → LUT → TRT FP16 → top-1 → multi-presence voter → SSE → Toss-style 웹페이지가 Jetson Nano에서 end-to-end 작동. P14/P50/P100/P2 정확도 93~97%, per-footstep 386ms, `--realtime` wall-clock 8 kHz throttle 통과, producer/consumer threading 검증, 실시간 시연 가능.
+## 현재 단계: 트랙 A (VIBeID A2/A3 통합 backbone v3) 다음 세션 진입 (2026-05-02 갱신)
+**Stage 1~5d + 다중 인원 voter (5e) + 웹 대시보드 (7) + Track B (multi-presence 합성 검증) 모두 PASS.** raw .mat → GMM → CWT(cwt_fast) → LUT → TRT FP16 → top-1 → multi-presence voter → SSE → Toss-style 웹페이지가 Jetson Nano 에서 end-to-end 작동. 검증 P14/P50/P100/P2 93~97%, per-footstep 386ms, `--realtime` wall-clock 8 kHz throttle 통과.
+
+**GitHub 백업 완료**: https://github.com/snup2e/jongsul_jetson (PUBLIC, 65+ 파일, weights+paper PDF 포함, data/.mat 제외).
 
 **ADS1256 + STM32 F411RE bridge 아키텍처 확정**: ADS1256 → STM32 F411RE Nucleo (HAL, ST-Link VCP) → UART2 921600 → Jetson `/dev/ttyACM0` → polyphase 8/15 (15000→8000). **마감 2026-06.**
 
-**현재 블로커 = ADS1256 모듈 식별 + STM32 펌웨어 작성**. 그동안 병행 가능한 작업 다수 — VIBeID A2/A3 통합 backbone 재학습 (A100), 다중 인원 합성 검증, 가족 데이터 수집 protocol 설계, STM32 CubeIDE 프로젝트 골격. 자세한 task 트리는 본 문서 하단 `## ⏭️ 다음 단계` 참조.
+### 다음 세션에서 바로 시작할 작업: 트랙 A
+**계획 확정** (위 "v2/v3 학습 파이프라인의 절대 원칙" + "OSF 저장소 구조" + "다음 단계 → 트랙 A" 세 섹션 참고):
+1. Colab Pro 새 노트북에서 OSF interim/{a1,a2,a3}.zip 직접 wget (3.73 GB)
+2. footstep_feat 로드 + 170-class 라벨 매핑
+3. 우리 LUT 로 pre-render (224×224 RGB uint8 .npy)
+4. `colab_v2_train.py` 셀 구조 reuse, num_classes 100→170 만 변경
+5. A100 25 epochs ~1.5시간 → best .pth + .onnx → Drive
+6. Jetson trtexec FP16 → P14/P50/P100/P1 재추론 → v2 와 분포 비교
+
+다음 세션 첫 메시지로 "트랙 A 계속" 만 알려주시면 위 1~6 따라 노트북 (`notebook/colab_v3_train.ipynb`) 작성 시작합니다.
 
 ### v2 핵심 변경 (2026-04-30)
 - v1 (`mobilenetv3_vibeid_a1_best.pth`, 84.69%)은 Colab matplotlib 픽셀에 brittle — 로컬 LUT 입력 시 P50 7%, P100 8% 처참.
 - v2 (`mobilenet_v3_large_v2_best.pth`, val **86.76%**) — augmentation 강화 (ColorJitter↑/RandomErasing/MixUp/label smoothing 0.15) + **LUT 학습** + per-class stratified 80/20 split (seed=42).
 - 로컬 검증: P14 93%, P50 98%, P100 95% (raw → 추출 → LUT). brittleness 완전 해결.
 - **JET LUT 결정론화**: Colab matplotlib 3.7 jet → `weights/jet_lut_v2.npy` (256×3 uint8, sha256 `fc594b04...`). `render_lut.py`가 이 .npy를 우선 로드.
+
+### ⚠️ v2/v3 학습 파이프라인의 절대 원칙 (재학습 시 반드시 따를 것)
+
+**재학습은 항상 `interim/*.mat` (footstep_feat) 에서 시작하고, 우리 LUT 코드로 렌더한다.** OSF 가 제공하는 `processed/*.zip` (PNG) 는 **절대 직접 학습에 쓰지 않는다** — 그 PNG 들은 paper 저자가 자기들 환경의 matplotlib jet 으로 렌더한 것이라 v1 brittleness 함정 그대로 재현됨.
+
+```
+[학습 데이터 경로 — v2 실측 / v3 동일하게 따를 것]
+interim/aN.zip 풀어서 footstep_feat (M, 1501) float64
+   ├ cols [0:1500] = 발걸음 1500-sample waveform (zero-pad)
+   └ col  [1500]   = 1-indexed pid (라벨)
+   ↓
+pywt.cwt(scales=1..256, 'morl') → (256, 1500) float64
+   ↓
+JET LUT 매핑 (matplotlib cm.get_cmap("jet") 256-entry, 또는 weights/jet_lut_v2.npy)
+   ↓
+cv2.resize → (224, 224, 3) uint8 RGB
+   ↓ (대량 pre-render, .npy mmap 로 저장)
+LUTDataset + augmentation (ColorJitter / RandomErasing / MixUp / label smoothing 0.15)
+   ↓
+MobileNetV3-Large (ImageNet pretrained → classifier[3] 교체) → softmax
+```
+
+**Jetson 추론도 같은 LUT 파이프라인** (`python/render_lut.py` + `python/cwt_fast.py`) 으로 입력 만들기 때문에 학습-추론 분포 일치. 이 흐름 깨면 v1 의 P50 7% 처참 사태 재발.
+
+**v3 (A1+A2+A3 통합) 도 동일 원칙**: OSF interim/{a1,a2,a3}.zip 받아서 → 우리 LUT 로 렌더 → 학습. processed/ 는 다운로드조차 하지 않음.
+
+---
 
 ### ⚠️ 데이터 라벨링 이슈 (2026-04-30 발견)
 - `data/raw/P1/` 폴더의 `P1_1..4.mat`은 **실제로는 P2 (a1.mat label==2) 데이터**.
@@ -99,9 +137,53 @@ VIBeID 는 **A1~A4 네 개의 서브셋** 으로 구성됨. 모두 동일 센서
 **프로젝트 페이지**: vibeidiclr.github.io (License CC BY-NC-SA 4.0)
 
 **우리 사용 현황**:
-- 현재: A1 일부 (P1, P14, P50, P100 raw + 전체 a1.mat) 만 다운로드
+- 현재: A1 일부 (P1, P14, P50, P100 raw + 전체 a1.mat) 만 로컬에 보유
 - v2 backbone 학습: A1 100-class 만 사용 → val 86.76%
 - A2/A3 미사용 → **실배포 시 floor/distance 차이로 인한 일반화 성능 손실 예상지점**
+
+### OSF 저장소 구조 (확인 2026-05-02, https://osf.io/vpwcz/files/osfstorage)
+
+최상단 3 폴더 + 5 서브셋 (paper 는 A1~A4 만 명시, **A5 는 paper 미언급** — 정체 불명, 일단 무시):
+
+```
+osfstorage/
+├── raw/        ← 사람×조건별 5분 .mat 여러 개 (geo_data float, 2.4M samples)
+│   ├── A1/A1.zip           3592 MB
+│   ├── A2/A2.zip           2736 MB
+│   ├── A3/A3.zip           4485 MB
+│   ├── A4/a4_1.zip + ...     96 MB (multi-modal, 작음)
+│   └── A5/A5.zip            723 MB
+├── interim/    ← 사전 추출된 footstep_feat (N, 1501) float64 한두 .mat 묶음
+│   ├── a1.zip              1.41 GB    ← v3 학습에 사용
+│   ├── a2.zip              0.78 GB    ← v3 학습에 사용
+│   ├── a3.zip              1.54 GB    ← v3 학습에 사용
+│   ├── a4.zip              4.03 GB    (camera 데이터 포함, 무시)
+│   └── a5.zip              0.36 GB
+└── processed/  ← 저자가 matplotlib jet 으로 렌더한 PNG (cwt_image_*.png 84×496)
+    ├── a1.zip              3.85 GB    ← 사용 X (브리틀, v1 함정)
+    ├── a2.zip              1.71 GB    ← 사용 X
+    ├── a3.zip              3.58 GB    ← 사용 X
+    ├── a4.zip              0.09 GB
+    └── a5.zip              0.94 GB
+```
+
+**v3 학습용 직링크 다운로드 (interim, 합계 3.73 GB)**:
+- `a1.zip` https://osf.io/download/2pmyk/  (100명, 한 floor)
+- `a2.zip` https://osf.io/download/mu8sx/  (30명 × A2_1.mat 1.5m / A2_2.mat 2.5m / A2_3.mat 4.0m, 모두 cement)
+- `a3.zip` https://osf.io/download/jkrg5/  (40명 × A3_1.mat wood / A3_2.mat carpet / A3_3.mat cement)
+
+**검증된 interim .mat 포맷** (a5/A5_1.mat 샘플로 확인, 2026-05-02):
+- 변수명: `footstep_feat` (단일 변수만 들어있음)
+- shape: `(N, 1501)` float64 (N = 그 .mat 의 footstep 수)
+- 컬럼 [:1500] = 발걸음 waveform (zero-pad), 컬럼 [1500] = 1-indexed pid
+- A2/A3 의 경우 zip 안에 3 개 .mat 분리됨 (조건별), pid 는 각 .mat 내부에서 1-N (N = 그 서브셋 인원수)
+
+**v3 글로벌 라벨 매핑 (170-class)**:
+- A1 footstep_feat 의 pid 1~100  → global label 0~99
+- A2 footstep_feat 의 pid 1~30   → global label 100~129  (A2_1/A2_2/A2_3 모두 동일 매핑)
+- A3 footstep_feat 의 pid 1~40   → global label 130~169  (A3_1/A3_2/A3_3 모두 동일 매핑)
+
+A1/A2/A3 피험자 overlap 여부는 paper supplementary 미확인. 1차는 별 클래스 가정 (= 안전, 같은 사람 두 라벨 받아도 backbone embedding 다양성에는 손해 없음).
 
 ---
 
@@ -538,25 +620,36 @@ Geophone (passive coil)
 
 ADS1256 모듈 식별 + STM32 펌웨어 작성이 메인 블로커. 그 사이 다음 4 트랙 병행:
 
-### 트랙 A — VIBeID A2/A3 통합 backbone 재학습 (Colab A100, 가장 임팩트 큼)
-**목표**: A1 단독 학습된 v2 의 floor/거리 일반화 한계를 극복. 본인 집 floor type 이 A1 의 floor 와 다를 가능성 큼 → A3 (multi-floor: wood/carpet/cement) 가 핵심.
+### 트랙 A — VIBeID A2/A3 통합 backbone v3 재학습 (Colab A100, 가장 임팩트 큼)
+**목표**: A1 단독 학습된 v2 의 floor/거리 일반화 한계 극복. 본인 집 floor type 이 A1 의 floor 와 다를 가능성 큼 → A3 (multi-floor: wood/carpet/cement) 가 핵심.
+
+**원칙 재확인**: interim .mat 만 받아서 **우리 LUT 로 직접 렌더 후 학습** (위 "v2/v3 학습 파이프라인의 절대 원칙" 섹션 참조). OSF processed PNG 는 다운로드조차 하지 않음.
+
+**Plan (확정 2026-05-02, 다음 세션에서 그대로 실행 가능)**:
 
 | 단계 | 작업 | 환경 | 예상 시간 |
 |---|---|---|---|
-| A.1 | VIBeID 프로젝트 페이지 (`vibeidiclr.github.io`) 에서 A2 + A3 raw 다운로드. 용량 미상 — 53시간 8 kHz 데이터, 20-30 GB 추정 | Windows | 다운로드 시간만 |
-| A.2 | A2/A3 raw → frozen GMM 통과 → 1500-sample footsteps. `extract.py` 그대로 reuse, 클래스 ID 충돌 없게 P101~ 부여 | Windows | 1-2일 |
-| A.3 | CWT → LUT → PNG 일괄 렌더 (`cwt_fast` + `render_lut`). A1 PNG 와 같은 disk 레이아웃 | Windows | 1일 (멀티프로세스) |
-| A.4 | 통합 split: A1 100 + A2 30 + A3 40 = 최대 170 클래스 (subject overlap 미고려). Per-class stratified 80/20, seed=42 동일 | Colab | < 1시간 |
-| A.5 | v3 학습: MobileNetV3-Large, 동일 augmentation (ColorJitter↑/RandomErasing/MixUp/label smoothing 0.15), 15-25 epochs, AMP, cosine | **A100** | 4-6시간 |
-| A.6 | 검증: A1 holdout val acc 비교 (v2 86.76% baseline), 더 중요한 cross-domain — A3.1 학습 → A3.2 평가 (논문 protocol) | Colab | < 1시간 |
-| A.7 | ONNX → Jetson TRT FP16 plan 재빌드 (`export_onnx.py` → `trtexec`) | Jetson | 30분 |
-| A.8 | `mnv3_v3_fp16.plan` 으로 P14_1.mat 재추론 — Stage 5c 와 분포 비교 | Jetson | < 1시간 |
+| A.1 | Colab 노트북에서 OSF 직접 wget — interim/{a1,a2,a3}.zip (3.73 GB) → `/content/interim/` 압축해제 | Colab Pro | 5-10분 |
+| A.2 | a1.mat + A2_{1,2,3}.mat + A3_{1,2,3}.mat 모두 `scipy.io.loadmat["footstep_feat"]` 로 로드, 글로벌 라벨 매핑 (A1: 0-99 / A2: 100-129 / A2_1+2+3 모두 동일 매핑 / A3: 130-169) | Colab | 5분 |
+| A.3 | `pywt.cwt(scales=1..256,'morl') + matplotlib jet 256-LUT + cv2.resize 224×224` 일괄 pre-render (joblib Parallel num_workers=4~8) → `/content/v3_data.npy` (uint8, ~56 GB) + `/content/v3_labels.npy` | Colab | 40-80분 (코어 수 따라) |
+| A.4 | `notebook/colab_v2_train.py` 의 LUTDataset / augmentation / 학습 루프 그대로 reuse. **변경**: num_classes 100→170, DATA_DIR 경로, val 분리 시 A1/A2/A3 별 holdout 기록 | Colab | 5분 코딩 |
+| A.5 | 학습: MobileNetV3-Large (ImageNet pretrained), classifier[3] 교체, AdamW lr=3e-4, label smoothing 0.15, AMP, cosine 25 epochs | A100 | 1.5시간 |
+| A.6 | 검증: (a) overall val acc / (b) **A1-only val acc** (v2 86.76% baseline 비교) / (c) cross-domain A3.1→A3.2 (paper protocol) / (d) Confusion matrix top-3 misclassified | Colab | 15-30분 |
+| A.7 | best `.pth` + 단일 ONNX (`export_onnx.py` 호출) 저장 → Drive `vibeid_capstone/weights/v3.onnx` | Colab | 5분 |
+| A.8 | Jetson 으로 .onnx scp → `trtexec --onnx=v3.onnx --fp16 --saveEngine=mnv3_v3_fp16.plan` | Jetson | 5분 |
+| A.9 | `web_server.py --plan mnv3_v3_fp16.plan` 으로 P14_1/P50_1/P100_1/P1_1.mat 재추론 — Stage 5c v2 분포 (P14 93.4% 등) 와 비교 | Jetson | 30분 |
+
+**총 사용자 손 시간**: ~3시간 (대부분 자동 진행, 학습 1.5h 는 모니터링만).
+
+**Drive 사용량**: 체크포인트 .pth (~70 MB) + .onnx (~17 MB) 만 저장. 56 GB pre-render 캐시는 Colab disk 임시 (세션 종료 시 자동 삭제).
 
 **기대 효과**: 본인 집 시연 시 floor 다른 환경에서도 일관된 embedding → 가족 transfer learning 적은 데이터로 high accuracy.
 
-**리스크**:
-- A2/A3 는 A1 과 다른 피험자 집합 → 통합 시 단순 라벨 부여 시 170-way classification 으로 task 어려워짐 (각 클래스당 데이터 양은 줄어들지만 backbone embedding 다양성 ↑).
-- Domain-aware 학습 (Domain Adversarial / GRL) 까지 가면 작업량 큼. **1차는 단순 통합 학습** 으로 baseline 잡고, 효과 미흡 시 도메인 적대 학습 검토.
+**리스크 / 결정 보류**:
+- A1/A2/A3 피험자 overlap 여부 paper supplementary 미확인. 1차는 별 클래스 가정 (170-way), backbone embedding 다양성에 손해 없음.
+- Domain-aware 학습 (Domain Adversarial / GRL) 은 작업량 크니 1차 PASS 후 효과 미흡 시 검토.
+
+**다음 세션 시작 액션**: 위 A.1~A.9 그대로 따라 `notebook/colab_v3_train.ipynb` 작성 + Colab 에서 실행. v2 노트북 (`notebook/colab_v2_train.py`) 의 셀 구조 90% reuse.
 
 ### 트랙 B — 다중 인원 voter 합성 검증 (Windows, 빠름) ✅ DONE 2026-05-02
 **목표**: Stage 5e voter 가 진짜 multi-presence 케이스에서 작동 확인.
