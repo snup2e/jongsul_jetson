@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#F2F4F6" />
+<title>우리집 · Terra</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" as="style" crossorigin
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<style>
+  :root {
+    --bg: #F2F4F6;
+    --card: #FFFFFF;
+    --line: #E5E8EB;
+    --text: #191F28;
+    --text-2: #4E5968;
+    --text-3: #8B95A1;
+    --blue: #3182F6;
+    --blue-bg: #E8F2FE;
+    --green: #1AC471;
+    --red: #F04452;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,.04);
+    --shadow-md: 0 1px 3px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+    --radius-lg: 20px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+      system-ui, Roboto, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    font-feature-settings: 'tnum';
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .app {
+    max-width: 520px; margin: 0 auto; padding: 16px 18px 60px;
+    min-height: 100vh;
+  }
+  .layout {
+    display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start;
+  }
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  @media (min-width: 760px) {
+    .app { max-width: 940px; padding: 18px 22px 60px; }
+    .layout { grid-template-columns: 1.05fr 1fr; gap: 18px; }
+  }
+
+  /* ── Header ────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 4px 16px; gap: 12px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+  .brand .dot {
+    width: 36px; height: 36px; border-radius: 12px; background: var(--blue);
+    display: grid; place-items: center; color: #fff; font-size: 18px;
+  }
+  .conn {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-3);
+    padding: 6px 10px; background: #fff; border-radius: 999px; box-shadow: var(--shadow-sm);
+  }
+  .conn .led {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--text-3);
+    transition: background .25s;
+  }
+  .conn.online .led { background: var(--green); box-shadow: 0 0 0 3px rgba(26,196,113,.15); }
+  .conn.online { color: var(--text-2); }
+
+  /* ── Hero card: 현재 집에 ─────────────────────────────── */
+  .card {
+    background: var(--card); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md); padding: 24px 22px; margin-bottom: 14px;
+  }
+  .card h2 {
+    margin: 0 0 4px; font-size: 14px; color: var(--text-2); font-weight: 600;
+    letter-spacing: -.01em;
+  }
+  .hero .count {
+    font-size: 30px; font-weight: 800; letter-spacing: -.02em; margin: 6px 0 18px;
+  }
+  .hero .count .num { color: var(--blue); }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+    gap: 14px;
+  }
+  .person {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    animation: pop .35s cubic-bezier(.2,.8,.3,1.2);
+  }
+  .person.leaving { animation: fadeOut .3s forwards; }
+  .avatar {
+    width: 64px; height: 64px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 30px;
+    position: relative;
+    box-shadow: 0 0 0 3px var(--card), 0 0 0 5px var(--avatar-c, var(--blue-bg));
+    background: var(--avatar-bg, var(--blue-bg));
+  }
+  .status-dot {
+    position: absolute; top: 2px; right: 2px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--text-3);
+    box-shadow: 0 0 0 2px var(--card);
+    transition: background .3s;
+  }
+  .person.recent .status-dot { background: var(--green); }
+  .person .name {
+    font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: -.01em;
+  }
+  .person .meta {
+    font-size: 11px; color: var(--text-3); font-weight: 500;
+  }
+  .empty {
+    padding: 28px 0 12px; text-align: center; color: var(--text-3);
+  }
+  .empty .em { font-size: 38px; margin-bottom: 8px; }
+  .empty .t { font-size: 14px; font-weight: 600; }
+
+  /* ── Recent events feed ──────────────────────────────── */
+  .feed h2 { margin-bottom: 12px; }
+  .feed .item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 4px; border-bottom: 1px solid var(--line);
+    animation: slideIn .35s cubic-bezier(.2,.8,.3,1);
+  }
+  .feed .item:last-child { border-bottom: none; }
+  .feed .ic {
+    width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--blue-bg); font-size: 20px; flex-shrink: 0;
+  }
+  .feed .ic.away { background: #F2F4F6; }
+  .feed .body { flex: 1; min-width: 0; }
+  .feed .body .t1 { font-size: 14px; font-weight: 600; }
+  .feed .body .t1 .name { color: var(--blue); }
+  .feed .body .t1 .verb-away { color: var(--text-2); }
+  .feed .body .t2 { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+  .feed .empty-row {
+    padding: 24px 0; text-align: center; color: var(--text-3); font-size: 13px;
+  }
+
+  /* ── Stats bar at bottom ─────────────────────────────── */
+  .stats {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #fff; border-radius: var(--radius-md); padding: 12px 16px;
+    box-shadow: var(--shadow-sm);
+    font-size: 13px; color: var(--text-2);
+  }
+  .stats .pill { display: flex; align-items: center; gap: 6px; }
+  .stats .pill .lab { color: var(--text-3); }
+  .stats .pill .v { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+
+  /* ── Radar (Toss 10원 style) ─────────────────────────── */
+  .radar-card { padding: 22px 20px 18px; }
+  .radar-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .radar-head h2 { margin: 0; }
+  .radar-status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-3); font-weight: 600;
+    padding: 4px 10px; background: var(--blue-bg); border-radius: 999px;
+    transition: background .25s, color .25s;
+  }
+  .radar-status .led {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--blue);
+  }
+  .radar-status.hot { background: #E6F7EE; color: #00875A; }
+  .radar-status.hot .led { background: var(--green); }
+
+  .radar-wrap { display: flex; justify-content: center; padding: 6px 0 4px; }
+  .radar { width: 100%; max-width: 280px; height: auto; display: block; }
+
+  .radar .ring {
+    fill: none; stroke: rgba(49,130,246,0.18); stroke-width: 0.6;
+  }
+  .radar .ring.outer { stroke: rgba(49,130,246,0.32); stroke-width: 1; }
+  .radar .cross { stroke: rgba(49,130,246,0.08); stroke-width: 0.4; }
+
+  .radar .sweep { transform-origin: 0 0; animation: sweep-rot 3.6s linear infinite; }
+  @keyframes sweep-rot { to { transform: rotate(360deg); } }
+
+  .radar .center-dot { fill: var(--blue); }
+  .radar .center-pulse {
+    fill: none; stroke: var(--blue);
+    transform-origin: 0 0;
+    animation: center-ping 2.2s ease-out infinite;
+  }
+  @keyframes center-ping {
+    0%   { r: 3;  opacity: .7;  stroke-width: 2; }
+    100% { r: 22; opacity: 0;   stroke-width: .3; }
+  }
+
+  /* Person dots — one per voter-confirmed person (= matches avatar grid).
+     Inference events that don't correspond to a confirmed person are
+     intentionally invisible — radar reflects the system's actual decision,
+     not raw model top-1 noise. */
+  .radar .person-dot .dot {
+    fill: var(--green);
+    transition: filter .25s;
+  }
+  .radar .person-dot.active .dot {
+    filter: drop-shadow(0 0 8px rgba(26,196,113,.6));
+  }
+  .radar .person-dot .lab {
+    fill: var(--text); font-weight: 800; font-size: 9px;
+    font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif;
+    paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round;
+    letter-spacing: -.02em;
+  }
+  .radar .person-dot .entry-ring {
+    fill: none; stroke: var(--green); stroke-width: 2;
+    opacity: 0;
+  }
+  .radar .person-dot.entering .entry-ring {
+    animation: entry-ring 0.7s ease-out;
+  }
+  .radar .person-dot.fading { animation: fade-out .35s forwards; }
+  @keyframes entry-ring {
+    0%   { r: 4;  opacity: .9; stroke-width: 2; }
+    100% { r: 26; opacity: 0;  stroke-width: .3; }
+  }
+  @keyframes fade-out { to { opacity: 0; } }
+
+  /* ── Toast notification ──────────────────────────────── */
+  .toast-stack {
+    position: fixed; top: env(safe-area-inset-top, 12px); left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 32px); max-width: 480px;
+    display: flex; flex-direction: column; gap: 10px; z-index: 100;
+    pointer-events: none;
+  }
+  .toast {
+    background: #fff; border-radius: var(--radius-md);
+    box-shadow: 0 8px 32px rgba(0,0,0,.12), 0 2px 8px rgba(0,0,0,.04);
+    padding: 14px 18px; display: flex; align-items: center; gap: 14px;
+    animation: toastIn .45s cubic-bezier(.2,.9,.3,1.2);
+    pointer-events: auto;
+  }
+  .toast.away .av { background: #F2F4F6; }
+  .toast.leaving { animation: toastOut .3s forwards; }
+  .toast .av {
+    width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 22px; flex-shrink: 0;
+  }
+  .toast .body { flex: 1; min-width: 0; }
+  .toast .body .t1 { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+  .toast .body .t1 .n { color: var(--blue); }
+  .toast .body .t2 { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+  /* ── Animations ───────────────────────────────────────── */
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(.6); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes fadeOut {
+    to { opacity: 0; transform: scale(.85); }
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(-30px) scale(.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes toastOut {
+    to { opacity: 0; transform: translateY(-20px) scale(.95); }
+  }
+</style>
+</head>
+<body>
+
+<div class="toast-stack" id="toasts"></div>
+
+<div class="app">
+
+  <header>
+    <div class="brand">
+      <div class="dot">🏠</div>
+      <span>우리집</span>
+    </div>
+    <div class="conn" id="conn">
+      <span class="led"></span><span id="conn-text">연결 중…</span>
+    </div>
+  </header>
+
+  <div class="layout">
+   <div class="col col-left">
+  <section class="card radar-card">
+    <div class="radar-head">
+      <h2>실시간 감지</h2>
+      <div class="radar-status" id="radar-status">
+        <span class="led"></span><span id="radar-text">스캔 중</span>
+      </div>
+    </div>
+    <div class="radar-wrap">
+      <svg class="radar" viewBox="-110 -110 220 220" preserveAspectRatio="xMidYMid meet"
+           aria-hidden="true">
+        <defs>
+          <linearGradient id="sweepGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#3182F6" stop-opacity="0"/>
+            <stop offset="55%"  stop-color="#3182F6" stop-opacity="0.10"/>
+            <stop offset="100%" stop-color="#3182F6" stop-opacity="0.42"/>
+          </linearGradient>
+          <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stop-color="#3182F6" stop-opacity="0.07"/>
+            <stop offset="100%" stop-color="#3182F6" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+
+        <circle r="100" fill="url(#bgGrad)"/>
+        <circle r="100" class="ring outer"/>
+        <circle r="70"  class="ring"/>
+        <circle r="40"  class="ring"/>
+
+        <line x1="-100" y1="0" x2="100" y2="0" class="cross"/>
+        <line x1="0" y1="-100" x2="0" y2="100" class="cross"/>
+
+        <!-- Sweeping cone: 70° wedge, rotates around (0,0) -->
+        <g class="sweep">
+          <path d="M0,0 L100,0 A100,100 0 0,0 34.2,-94.0 Z" fill="url(#sweepGrad)"/>
+        </g>
+
+        <circle r="2.5" class="center-pulse"/>
+        <circle r="2.5" class="center-dot"/>
+
+        <g id="blips"></g>
+      </svg>
+    </div>
+  </section>
+
+  <section class="card hero">
+    <h2>지금 집에 있는 사람</h2>
+    <div class="count"><span class="num" id="count">0</span>명이 있어요</div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none;">
+      <div class="em">🌙</div>
+      <div class="t">지금은 집이 비어 있어요</div>
+    </div>
+  </section>
+
+   </div><!-- /.col-left -->
+   <div class="col col-right">
+  <section class="card feed">
+    <h2>최근 발자취</h2>
+    <div id="feed">
+      <div class="empty-row">아직 발걸음이 없어요</div>
+    </div>
+  </section>
+
+  <div class="stats">
+    <div class="pill"><span class="lab">발걸음</span><span class="v" id="footsteps">0</span></div>
+    <div class="pill"><span class="lab">큐</span><span class="v" id="queue">0</span></div>
+    <div class="pill"><span class="lab">경과</span><span class="v" id="elapsed">0s</span></div>
+  </div>
+   </div><!-- /.col-right -->
+  </div><!-- /.layout -->
+</div>
+
+<script>
+(function() {
+  const $ = (id) => document.getElementById(id);
+  const grid = $('grid');
+  const empty = $('empty');
+  const feed = $('feed');
+  const conn = $('conn');
+  const connText = $('conn-text');
+
+  // ── State ───────────────────────────────────────────────
+  const state = {
+    present: new Map(),   // pid -> {name, emoji, last_seen, conf, entered_at}
+    feed: [],             // [{type, name, emoji, ts}]
+    pidColor: new Map(),  // pid -> hsl
+    // Anchor for the locally-ticking elapsed counter:
+    //   displayed_elapsed = anchor.server + (now() - anchor.localAt)
+    elapsedAnchor: null,
+  };
+
+  function colorFor(pid) {
+    if (state.pidColor.has(pid)) return state.pidColor.get(pid);
+    // deterministic hue per pid (golden ratio scrambling for spread)
+    const h = (pid * 137.508) % 360;
+    const c = `hsl(${h}, 75%, 92%)`;
+    state.pidColor.set(pid, c);
+    return c;
+  }
+
+  function fmtAgo(ts) {
+    const s = Math.max(0, Math.floor((Date.now()/1000 - ts)));
+    if (s < 5) return '방금 전';
+    if (s < 60) return `${s}초 전`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}분 전`;
+    const h = Math.floor(m / 60);
+    return `${h}시간 전`;
+  }
+
+  // ── Render: present grid (diff-based, no flicker) ──────
+  // Person <div>s are created ONCE per entry. Subsequent renderGrid calls
+  // only update the meta text and 'recent' class in place — so the pop
+  // animation never re-triggers on the same avatar.
+  function renderGrid() {
+    const list = Array.from(state.present.values())
+      .sort((a, b) => b.last_seen - a.last_seen);
+    $('count').textContent = list.length;
+    empty.style.display = list.length === 0 ? 'block' : 'none';
+
+    const now = Date.now() / 1000;
+    const presentIds = new Set(list.map(p => p.person_id));
+
+    // 1. Remove anyone no longer present
+    for (const child of Array.from(grid.children)) {
+      const pid = parseInt(child.dataset.pid, 10);
+      if (!presentIds.has(pid)) child.remove();
+    }
+
+    // 2. Add or update
+    for (const p of list) {
+      const recent = (now - p.last_seen) < 8;
+      let el = grid.querySelector(`[data-pid="${p.person_id}"]`);
+      if (!el) {
+        // first appearance — create with entry animation
+        el = document.createElement('div');
+        el.dataset.pid = p.person_id;
+        el.className = 'person';
+        const c = colorFor(p.person_id);
+        el.innerHTML = `
+          <div class="avatar" style="--avatar-bg:${c};--avatar-c:${c};">
+            ${p.emoji}
+            <span class="status-dot"></span>
+          </div>
+          <div class="name">${escapeHtml(p.name)}</div>
+          <div class="meta"></div>
+        `;
+        grid.appendChild(el);
+      }
+      // in-place updates (no DOM destruction, no animation restart)
+      const meta = el.querySelector('.meta');
+      const text = `${fmtAgo(p.entered_at)} 입장`;
+      if (meta.textContent !== text) meta.textContent = text;
+      el.classList.toggle('recent', recent);
+    }
+  }
+
+  // ── Render: feed ────────────────────────────────────────
+  function pushFeed(item) {
+    state.feed.unshift(item);
+    if (state.feed.length > 30) state.feed.pop();
+    renderFeed();
+  }
+
+  function renderFeed() {
+    if (state.feed.length === 0) {
+      feed.innerHTML = '<div class="empty-row">아직 발걸음이 없어요</div>';
+      return;
+    }
+    feed.innerHTML = '';
+    for (const it of state.feed) {
+      const row = document.createElement('div');
+      row.className = 'item';
+      const verb = it.type === 'away'
+        ? `<span class="verb-away">집을 나갔어요</span>`
+        : `들어왔어요`;
+      const conf = it.conf != null
+        ? `· 확신도 ${Math.round(it.conf * 100)}%`
+        : '';
+      row.innerHTML = `
+        <div class="ic ${it.type === 'away' ? 'away' : ''}">${it.emoji}</div>
+        <div class="body">
+          <div class="t1"><span class="name">${escapeHtml(it.name)}</span>님이 ${verb}</div>
+          <div class="t2">${fmtAgo(it.ts)} ${conf}</div>
+        </div>
+      `;
+      feed.appendChild(row);
+    }
+  }
+
+  // ── Toast ───────────────────────────────────────────────
+  const toasts = $('toasts');
+  function showToast({ name, emoji, type, conf }) {
+    const t = document.createElement('div');
+    t.className = 'toast' + (type === 'away' ? ' away' : '');
+    const verb = type === 'away' ? '집을 나갔어요' : '들어왔어요!';
+    const sub = conf != null
+      ? `Terra가 ${Math.round(conf * 100)}% 확신해요`
+      : '';
+    t.innerHTML = `
+      <div class="av" style="background:${colorFor(0) /* placeholder */}">${emoji}</div>
+      <div class="body">
+        <div class="t1"><span class="n">${escapeHtml(name)}</span>님이 ${verb}</div>
+        <div class="t2">${sub}</div>
+      </div>
+    `;
+    // override avatar color with the right pid color
+    toasts.appendChild(t);
+    setTimeout(() => {
+      t.classList.add('leaving');
+      setTimeout(() => t.remove(), 350);
+    }, 4200);
+  }
+
+  // ── Radar: persistent person dots ───────────────────────
+  // Radar mirrors avatar grid state: one dot per voter-confirmed person.
+  // Inference events for confirmed people make their dot pulse briefly.
+  // Misclassifications and pre-confirm noise are NOT shown (they belong
+  // in the model's internal state, not on screen).
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const blipsLayer = $('blips');
+  const radarDots = new Map();   // pid -> { g, timer }
+
+  let statusTimer = null;
+  function setRadarStatus(text, hot) {
+    const el = $('radar-status');
+    if (hot) el.classList.add('hot'); else el.classList.remove('hot');
+    $('radar-text').textContent = text;
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      $('radar-status').classList.remove('hot');
+      $('radar-text').textContent = '스캔 중';
+    }, 5000);
+  }
+
+  function radarPosition(pid, conf) {
+    const ang = (pid * 137.508) * Math.PI / 180;
+    const r   = 30 + (1 - (conf || 0.7)) * 35;   // 30-65 (closer = higher conf)
+    return { x: r * Math.cos(ang), y: -r * Math.sin(ang) };
+  }
+
+  function addRadarDot(pid, name, conf) {
+    if (radarDots.has(pid)) {
+      // shouldn't happen (confirm only fires on transition) but be safe
+      const old = radarDots.get(pid);
+      if (old.timer) clearTimeout(old.timer);
+      old.g.remove();
+      radarDots.delete(pid);
+    }
+    const pos = radarPosition(pid, conf);
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'person-dot entering');
+    g.setAttribute('transform', `translate(${pos.x.toFixed(1)},${pos.y.toFixed(1)})`);
+
+    const ring = document.createElementNS(SVG_NS, 'circle');
+    ring.setAttribute('class', 'entry-ring');
+    g.appendChild(ring);
+
+    const dot = document.createElementNS(SVG_NS, 'circle');
+    dot.setAttribute('class', 'dot');
+    dot.setAttribute('r', '4.5');
+    g.appendChild(dot);
+
+    const label = document.createElementNS(SVG_NS, 'text');
+    label.setAttribute('class', 'lab');
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('y', '-9');
+    label.textContent = name || ('P' + (pid + 1));
+    g.appendChild(label);
+
+    blipsLayer.appendChild(g);
+    setTimeout(() => g.classList.remove('entering'), 700);
+    radarDots.set(pid, { g, timer: null });
+  }
+
+  function pulseRadarDot(pid) {
+    const d = radarDots.get(pid);
+    if (!d) return;          // person not confirmed yet → nothing to pulse
+    d.g.classList.add('active');
+    if (d.timer) clearTimeout(d.timer);
+    d.timer = setTimeout(() => {
+      d.g.classList.remove('active');
+      d.timer = null;
+    }, 900);
+  }
+
+  function removeRadarDot(pid) {
+    const d = radarDots.get(pid);
+    if (!d) return;
+    d.g.classList.add('fading');
+    if (d.timer) clearTimeout(d.timer);
+    setTimeout(() => d.g.remove(), 350);
+    radarDots.delete(pid);
+  }
+
+  function clearRadarDots() {
+    for (const d of radarDots.values()) {
+      if (d.timer) clearTimeout(d.timer);
+      d.g.remove();
+    }
+    radarDots.clear();
+  }
+
+  // ── Event handlers ──────────────────────────────────────
+  function handle(ev) {
+    if (ev.type === 'hello') {
+      // initial state on (re)connect — sync grid AND radar dots
+      state.present.clear();
+      clearRadarDots();
+      for (const p of (ev.present || [])) {
+        state.present.set(p.person_id, p);
+        addRadarDot(p.person_id, p.name, p.conf);
+      }
+      renderGrid();
+      return;
+    }
+    if (ev.type === 'inference') {
+      // Only pulse the radar if this person is currently confirmed-present.
+      // Misclassified or pre-confirm inferences stay invisible.
+      if (radarDots.has(ev.person_id)) {
+        pulseRadarDot(ev.person_id);
+        setRadarStatus(`${ev.name} · ${Math.round(ev.conf * 100)}%`, false);
+        // Keep grid status-dot green for 8s after each footstep
+        const p = state.present.get(ev.person_id);
+        if (p) p.last_seen = ev.ts;
+      }
+      renderGrid();
+      return;
+    }
+    if (ev.type === 'confirm') {
+      const wasPresent = state.present.has(ev.person_id);
+      state.present.set(ev.person_id, {
+        person_id: ev.person_id, name: ev.name, emoji: ev.emoji,
+        last_seen: ev.ts, conf: ev.conf,
+        entered_at: wasPresent
+          ? state.present.get(ev.person_id).entered_at
+          : ev.ts,
+      });
+      renderGrid();
+      setRadarStatus(`${ev.name} 확인됨`, true);
+      if (!wasPresent) {
+        addRadarDot(ev.person_id, ev.name, ev.conf);
+        showToast({ name: ev.name, emoji: ev.emoji, type: 'enter', conf: ev.conf });
+        pushFeed({ type: 'enter', name: ev.name, emoji: ev.emoji, ts: ev.ts, conf: ev.conf });
+      } else {
+        pulseRadarDot(ev.person_id);
+      }
+      return;
+    }
+    if (ev.type === 'away') {
+      state.present.delete(ev.person_id);
+      removeRadarDot(ev.person_id);
+      renderGrid();
+      showToast({ name: ev.name, emoji: ev.emoji, type: 'away' });
+      pushFeed({ type: 'away', name: ev.name, emoji: ev.emoji, ts: ev.ts });
+      return;
+    }
+    if (ev.type === 'stats') {
+      $('footsteps').textContent = ev.footsteps;
+      $('queue').textContent = ev.queue_depth;
+      // Anchor the local ticker to the server's value so we can keep the
+      // display ticking smoothly between (≥1s spaced) stats events.
+      state.elapsedAnchor = {
+        server: ev.elapsed,
+        localAt: Date.now() / 1000,
+      };
+      tickElapsed();
+      return;
+    }
+  }
+
+  function tickElapsed() {
+    const a = state.elapsedAnchor;
+    if (!a) return;
+    const drift = (Date.now() / 1000) - a.localAt;
+    $('elapsed').textContent = `${Math.round(a.server + drift)}s`;
+  }
+  setInterval(tickElapsed, 500);  // 0.5s = sub-second smoothness for "Ns" ticks
+
+  // ── SSE connection ──────────────────────────────────────
+  let es = null;
+  function connect() {
+    if (es) try { es.close(); } catch (e) {}
+    es = new EventSource('/events');
+    es.onopen = () => {
+      conn.classList.add('online');
+      connText.textContent = 'Jetson 연결됨';
+    };
+    es.onmessage = (e) => {
+      try { handle(JSON.parse(e.data)); }
+      catch (err) { console.error('bad event', err, e.data); }
+    };
+    es.onerror = () => {
+      conn.classList.remove('online');
+      connText.textContent = '재연결 중…';
+      // EventSource auto-reconnects, no manual retry needed
+    };
+  }
+  connect();
+
+  // refresh "X초/분 전" labels every 5s
+  setInterval(renderGrid, 5000);
+
+  // ── utils ──────────────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+})();
+</script>
+
+</body>
+</html>

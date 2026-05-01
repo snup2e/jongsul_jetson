@@ -1,0 +1,45 @@
+# ── Large dataset files (excluded — re-fetch from VIBeID project page) ──
+data/raw/
+data/interim/
+data/processed/
+*.mat
+*.npz
+!python/gmm_params.npz
+
+# ── Python build artifacts ──
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Virtual envs / IDE / OS ──
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ── Claude Code local settings ──
+.claude/
+
+# ── Jupyter checkpoints ──
+.ipynb_checkpoints/
+
+# ── Stage / scratch outputs ──
+python/_out_stage*/
+python/stage*_results.npz
+python/*.log
+
+# ── TRT plans / large per-device artifacts (rebuild on Jetson) ──
+*.plan
+*.engine
+
+# ── Temporary edit files ──
+*.swp
+*~
+*.tmp
