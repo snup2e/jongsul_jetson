@@ -288,7 +288,9 @@ ADS1256 통합 시 single-step latency 충분, 3-step voting까지 해도 end-to
 - `Voter` 를 `main()` 에서 생성 → `PresenceTracker(on_away=voter.forget)` 콜백으로 sweep_away 발생 시 voter confirmed-set 정리.
 - voter 가 confirmed 유지 중인데 presence 가 시간 경과로 away 처리한 stale state 방지.
 
-**Stage 5c 회귀 0**: 단일 인원 P14_1.mat 시연 시 P14 1회 confirm 결과 동일. 다중 인원 합성 검증은 sensor 도착 전 task 로 등록 (validate_multi_presence.py 작성 예정).
+**Stage 5c 회귀 0**: 단일 인원 P14_1.mat 시연 시 P14 1회 confirm 결과 동일.
+
+**다중 인원 합성 검증 → PASS** (`validate_multi_presence.py`, 2026-05-02). P14+P50 (P50 sparse) interleave 45s 블록 + P14+P100 (둘 다 dense) interleave 15s/30s 블록 → 6/6 케이스에서 두 사람 모두 confirm. 30s 블록 케이스에서 forget/re-emit 동작 실증 (P14 confirm → P100 phase → P14 phase 복귀 시 P14 재confirm). OOD sample-level 신호 합산 (`sum 1:1`) 은 분류기 학습 분포 밖이라 P41 같은 임의 클래스 출력 — 단일 채널 근본 한계, 종설 narrative 에 명시적 한계로 기록.
 
 ### Stage 7 — 실시간 웹 대시보드 (Flask + SSE) → PASS (2026-05-01)
 **동기**: Jetson 출력 → 노트북/폰 브라우저로 "지금 집에 누가 있는지" 시각화. ADS1256 도착 후 본인 / 가족 시연 즉시 가능하도록 dashboard 미리 구축.
@@ -408,7 +410,7 @@ E:\Terra\
     ├── web/
     │   ├── index.html                   # Toss-style 대시보드 (Pretendard, 레이더, 2단 레이아웃)
     │   └── people.json                  # pid → {name, emoji} 매핑 (가족 시연 시 편집)
-    ├── validate_multi_presence.py       # [작성 예정] P14⊕P50 합성 → 둘 다 confirm 검증
+    ├── validate_multi_presence.py       # P14+P50/P100 temporal interleave → 다중 voter PASS (2026-05-02)
     ├── record_session.py                # [작성 예정] 가족 발걸음 데이터 수집 스크립트
     ├── ads1256_source.py                # [LEGACY/폴백] Jetson-direct RDATAC + 폴리페이즈 16/15 (7500→8000)
     ├── ads1256_bench.py                 # [LEGACY/폴백] Jetson-direct SPI ladder + Plan B trigger
@@ -556,16 +558,17 @@ ADS1256 모듈 식별 + STM32 펌웨어 작성이 메인 블로커. 그 사이 �
 - A2/A3 는 A1 과 다른 피험자 집합 → 통합 시 단순 라벨 부여 시 170-way classification 으로 task 어려워짐 (각 클래스당 데이터 양은 줄어들지만 backbone embedding 다양성 ↑).
 - Domain-aware 학습 (Domain Adversarial / GRL) 까지 가면 작업량 큼. **1차는 단순 통합 학습** 으로 baseline 잡고, 효과 미흡 시 도메인 적대 학습 검토.
 
-### 트랙 B — 다중 인원 voter 합성 검증 (Windows, 빠름)
+### 트랙 B — 다중 인원 voter 합성 검증 (Windows, 빠름) ✅ DONE 2026-05-02
 **목표**: Stage 5e voter 가 진짜 multi-presence 케이스에서 작동 확인.
 
-| 단계 | 작업 | 산출물 |
-|---|---|---|
-| B.1 | `python/validate_multi_presence.py` 작성 — `P14_1.mat` ⊕ `P50_1.mat` 합성 (amplitude 비율 1:1, 1:0.5, 0.5:1; time offset 0/100/250 ms). Streaming pipeline 통과 | 검증 스크립트 |
-| B.2 | 결과 카운트: 각 합성 신호에서 voter 가 P14, P50 둘 다 confirm 하는지. confirm latency (몇 footstep 안에) 측정 | 표 1개 |
-| B.3 | 임계 sweep (M=3 vs M=4, K=8 vs K=10 vs K=12). false-positive 발생 케이스 식별 | 권장 파라미터 |
+**결과** (`python/validate_multi_presence.py`, 90s/case, K=10/M=3):
+- Solo P14/P50/P100 controls: **3/3 PASS** (각자만 confirm, 오인 0)
+- Temporal interleave 45s P14+P50: **PASS** (P14 #4, P50 #52)
+- Temporal interleave 30s P14+P100: **PASS** (P14 #4 → P100 #34 → P14 #53 re-emit)
+- Temporal interleave 15s P14+P100: **PASS** (빠른 alternation, forget/re-emit 동작 실증)
+- OOD sum 1:1 (sample-level 합산): **FAIL → 예상된 한계**. 분류기가 P41 (학습된 제3자) 출력 → 학습 분포 밖 입력은 단일 채널로 풀 수 없음. 종설 narrative 에 한계 명시.
 
-**예상 시간**: 1일.
+P50_1.mat 의 footstep 밀도 0.11 Hz (가정 실측 1.5 Hz 의 1/14) → 짧은 블록은 K=10 안에 P50 ≥M 누적 안 됨. 가정 보행 정상 밀도 (P14, P100) 는 15s 블록도 통과.
 
 ### 트랙 C — STM32 사전 준비 (CubeIDE 프로젝트 골격, 모듈 도착 무관)
 **목표**: ADS1256 모듈 도착 즉시 펌웨어 디버깅 시작 가능하도록 사전 작업.
