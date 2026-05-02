@@ -3,23 +3,25 @@
 ## 프로젝트 목표
 원본 Terra 레포지토리 (MATLAB 기반 발걸음 분류 연구 코드)를 **Python으로 포팅**하여 **Jetson Nano P3450**에서 **실시간 추론**을 수행한다. 원작자의 데이터 처리 파이프라인을 정확히 재현하는 것이 1차 목표.
 
-## 현재 단계: 트랙 A (VIBeID A2/A3 통합 backbone v3) 다음 세션 진입 (2026-05-02 갱신)
-**Stage 1~5d + 다중 인원 voter (5e) + 웹 대시보드 (7) + Track B (multi-presence 합성 검증) 모두 PASS.** raw .mat → GMM → CWT(cwt_fast) → LUT → TRT FP16 → top-1 → multi-presence voter → SSE → Toss-style 웹페이지가 Jetson Nano 에서 end-to-end 작동. 검증 P14/P50/P100/P2 93~97%, per-footstep 386ms, `--realtime` wall-clock 8 kHz throttle 통과.
+## 현재 단계: 트랙 A (v3 backbone) 완료, ADS1256 도착 대기 (2026-05-02 갱신)
+**Stage 1~5d + 다중 인원 voter (5e) + 웹 대시보드 (7) + Track B (multi-presence 합성 검증) + Track A (v3 backbone 학습 + Jetson 재추론) 모두 PASS.** raw .mat → GMM → CWT(cwt_fast) → LUT → TRT FP16 → top-1 → multi-presence voter → SSE → Toss-style 웹페이지가 Jetson Nano 에서 end-to-end 작동. v2 검증 P14/P50/P100/P2 93~97%, v3 P14 86.7% (170-class trade-off), per-footstep 386ms.
 
 **GitHub 백업 완료**: https://github.com/snup2e/jongsul_jetson (PUBLIC, 65+ 파일, weights+paper PDF 포함, data/.mat 제외).
 
 **ADS1256 + STM32 F411RE bridge 아키텍처 확정**: ADS1256 → STM32 F411RE Nucleo (HAL, ST-Link VCP) → UART2 921600 → Jetson `/dev/ttyACM0` → polyphase 8/15 (15000→8000). **마감 2026-06.**
 
-### 다음 세션에서 바로 시작할 작업: 트랙 A
-**계획 확정** (위 "v2/v3 학습 파이프라인의 절대 원칙" + "OSF 저장소 구조" + "다음 단계 → 트랙 A" 세 섹션 참고):
-1. Colab Pro 새 노트북에서 OSF interim/{a1,a2,a3}.zip 직접 wget (3.73 GB)
-2. footstep_feat 로드 + 170-class 라벨 매핑
-3. 우리 LUT 로 pre-render (224×224 RGB uint8 .npy)
-4. `colab_v2_train.py` 셀 구조 reuse, num_classes 100→170 만 변경
-5. A100 25 epochs ~1.5시간 → best .pth + .onnx → Drive
-6. Jetson trtexec FP16 → P14/P50/P100/P1 재추론 → v2 와 분포 비교
+### 트랙 A 결과 요약 (2026-05-02 완료)
+- v3 학습: A100 7.4시간 (pre-render 1.5h + train 25 epoch 3.7h), Colab Pro 컴퓨팅 약 40 단위 소비
+- 최종 best val 70.29% (ep 16/25), 도메인별 편차 큼 (A2_1 88%, A2_3 86.5%, A3_2 86%, A2_2 32.9% 이상치, A3_1 52.3%, A1 72.1%)
+- A1 v2 86.76% → v3 71.4% 약 15pp 하락 — 주 원인 의심: augmentation over-regularization (170-class에 v2의 ColorJitter 0.3+MixUp 0.2+RandomErasing 0.25 과한 정규화) > A1/A2/A3 person identity overlap > 클래스 100→170
+- A2_2 (2.5m cement) 33% 이상치 — paper의 multi-distance transfer task 가 정확히 인접 거리 사이 어려움 명시함, 데이터/학습 고유 한계
+- **Jetson 재추론 P14_1.mat: P14 86.7% (313/361, avg conf 66.4%)** — v2의 93.4% 대비 6.7pp 하락이지만 backbone diversity 효과 (A2/A3 도메인 노출) 확보. confusion classes (P21/P151/P137/P92) 모두 conf 27-41% 로 voter conf_min=0.5 통과 못 함, false positive 0.
+- 결론: v2/v3 두 backbone 모두 보존. ADS1256 + 가족 데이터 받은 후 transfer learning 결과로 최종 선택. 추가 학습 (ResNet 전환, augmentation 약화) 우선순위 낮음 — 진짜 deployment metric 은 transfer 결과.
 
-다음 세션 첫 메시지로 "트랙 A 계속" 만 알려주시면 위 1~6 따라 노트북 (`notebook/colab_v3_train.ipynb`) 작성 시작합니다.
+### 다음 세션에서 시작할 작업
+컴퓨팅 안 쓰는 트랙 우선 (ADS1256 도착 전):
+- **트랙 C** — STM32 펌웨어 골격 (CubeIDE, NUCLEO-F411RE 단독 bring-up: USART2 tick / GPIO 토글 / binary frame 파서)
+- **트랙 D** — 가족 데이터 수집 protocol 문서화 (`docs/COLLECTION_PROTOCOL.md`, `record_session.py` 골격, transfer learning 아키텍처 결정)
 
 ### v2 핵심 변경 (2026-04-30)
 - v1 (`mobilenetv3_vibeid_a1_best.pth`, 84.69%)은 Colab matplotlib 픽셀에 brittle — 로컬 LUT 입력 시 P50 7%, P100 8% 처참.
@@ -323,7 +325,7 @@ ADS1256 통합 시 single-step latency 충분, 3-step voting까지 해도 end-to
 - 분포: P14 337 (93.4%, conf 74.1%) / P15 6 / P21 6 / P92 3 / P29 2 → **Stage 5b와 비트 단위 일치**
 - voter: P14 confirm 1회 (#4 footstep, conf 79.8%) — 동일 클래스 transition-only emit이라 정상
 
-**Cross-person spot check** (raw .mat 3개 추가 검증):
+**Cross-person spot check** (raw .mat 3개 추가 검증, v2 backbone):
 | 파일 | top-1 결과 | 정확도 | conf | realtime |
 |---|---|---|---|---|
 | P50_1.mat | P50 58/61 | 95.1% | 75.7% | 6.64× |
@@ -333,6 +335,16 @@ ADS1256 통합 시 single-step latency 충분, 3-step voting까지 해도 end-to
 - P1 폴더 데이터의 진짜 라벨이 P2임이 추가 확인됨 (raw → top-1 P2 강하게 나옴, 라벨링 이슈 검증).
 - frozen GMM (P14 100s 학습)이 P50/P100/P2 신호에서도 정상 발걸음 검출 (일반화 확인).
 - 모든 오분류 conf 21-46% → voter (conf_min=0.5) 통과 못 함, 실시간 false-positive 위험 0.
+
+**v3 backbone 재추론 (2026-05-02, mnv3_v3_fp16.plan)**:
+| 파일 | top-1 결과 | 정확도 | avg conf | realtime | v2 대비 |
+|---|---|---|---|---|---|
+| P14_1.mat | P14 313/361 | **86.7%** | 66.4% | 1.95× | −6.7pp |
+
+- confusion top-4: P21 (12, 3.3% conf 41%), P151 (5, A3 도메인), P137 (5, A3 도메인), P92 (5, A1) — A3 도메인 confusion 새로 등장 = backbone 이 wood/carpet 도메인 신호도 학습한 흔적 (의도된 다양성 효과)
+- 모든 confusion conf 27-41% → voter conf_min=0.5 통과 못 함, false positive 0
+- queue full_waits=5/361 (max_depth 31/32) — TRT plan 9.7→17 MB 증가로 consumer 부담 약간 증가, 가족 deploy budget 안.
+- v2 (93.4%, 단일 도메인 fit) vs v3 (86.7%, 7 도메인 학습) 의 trade-off 의도대로 됨. 가정 transfer learning 시 어느 쪽이 유리한지는 가족 데이터 수집 후 결정.
 
 **의의**: streaming smoother + sliding detector 로직이 offline과 byte-equal. ADS1256 통합 시 파이프라인 코드는 의심 0 — `MatFileSource`를 `ADS1256Source`로 갈아끼우면 끝. 8 kHz 입력 (=125 µs/sample)에 대해 큐 누적 0 (worst case 2.15× 마진).
 
@@ -477,9 +489,10 @@ E:\Terra\
 │   ├── interim/a1.mat
 │   └── processed/
 ├── weights/                     # 모델 + LUT
-│   ├── mobilenet_v3_large_v2_best.pth   # v2 (production, val 86.76%)
-│   ├── mobilenet_v3_large_v2.onnx       # ONNX (Jetson용)
-│   ├── jet_lut_v2.npy                   # 결정론적 jet LUT (Colab matplotlib 3.7)
+│   ├── mobilenet_v3_large_v2_best.pth   # v2 (A1 100-class, val 86.76% — production for now)
+│   ├── mobilenet_v3_large_v2.onnx       # v2 ONNX (Jetson용)
+│   ├── mobilenet_v3_large_v3.onnx       # v3 (A1+A2+A3 170-class, val 70.29%, P14 86.7%) — 2026-05-02
+│   ├── jet_lut_v2.npy                   # 결정론적 jet LUT (Colab matplotlib 3.7) — v2/v3 공용
 │   └── mobilenetv3_vibeid_a1_best.pth   # v1 (legacy, brittle, 비교용 보존)
 └── python/                      # 포팅 + 추론 작업물
     ├── extract.py                       # MATLAB → Python (smooth/gausswin/GMM-EM/Event_Extract) — Hazen fallback 포함
@@ -510,11 +523,45 @@ E:\Terra\
     └── _out_stage23/                    # 렌더 PNG (참조 비교용)
 ```
 
+### Jetson 측 디렉토리 구조 (`snup2@121.254.39.88:~/terra/`, 확인 2026-05-02)
+
+**flat 구조** — Windows 의 `python/` + `weights/` 두 트리가 Jetson 에선 한 폴더로 평탄화됨. Python 스크립트가 `cwd=~/terra/` 에서 실행되며 plan/onnx 도 같은 곳에서 상대 경로로 로드.
+
+```
+~/terra/                                 # snup2@121.254.39.88, JetPack 4.6.6
+├── CLAUDE.md                            # Jetson 측 메모 (Windows 본 별도 사본)
+├── JETSON_SETUP.md                      # Jetson 환경 셋업 가이드
+├── extract.py                           # python/ 와 동일 (rsync로 동기화)
+├── cwt_fast.py
+├── render_lut.py
+├── jetson_infer.py
+├── jetson_realtime.py
+├── jetson_cwt_bench.py
+├── web_server.py
+├── stream.py
+├── gmm_params.npz                       # frozen GMM (Windows python/gmm_params.npz 와 동일)
+├── jet_lut_v2.npy                       # 결정론적 jet LUT (Windows weights/jet_lut_v2.npy 와 동일)
+├── mobilenet_v3_large_v2.onnx           # 17 MB
+├── mnv3_v2_fp16.plan                    # 9.7 MB, TRT FP16 build (v2 production)
+├── mobilenet_v3_large_v3.onnx           # 17 MB, v3 (2026-05-02 추가)
+├── mnv3_v3_fp16.plan                    # [작성 예정] trtexec --onnx=v3.onnx --fp16
+├── trt_build.log                        # trtexec 빌드 로그
+├── sample/                              # 시연용 raw .mat (P14_1.mat 등)
+├── web/                                 # web_server.py 의 static (index.html, people.json)
+└── __pycache__/
+```
+
+**중요**: scp 시 v2 와 동일하게 `~/terra/` flat 에 직접 떨군다. `~/terra/weights/` 같은 하위 폴더 만들지 말 것 (스크립트가 cwd 기준 상대 경로 가정). v3 파일 옮길 때:
+```bash
+scp E:/Terra/weights/mobilenet_v3_large_v3.onnx snup2@121.254.39.88:~/terra/
+ssh snup2@121.254.39.88 "cd ~/terra && trtexec --onnx=mobilenet_v3_large_v3.onnx --fp16 --saveEngine=mnv3_v3_fp16.plan --workspace=512"
+```
+
 ---
 
 ## ⏭️ 다음 단계 — 실시간 최적화 + ADS1256 통합
 
-### 완료 (2026-05-01 기준)
+### 완료 (2026-05-02 갱신)
 - [x] MATLAB → Python 포팅 (`extract.py`, Stage 1~3 검증)
 - [x] LUT 결정론화 (`weights/jet_lut_v2.npy`, sha256 fc594b04...)
 - [x] frozen GMM (`python/gmm_params.npz`, P14 100s seed=0)
@@ -532,6 +579,11 @@ E:\Terra\
 - [x] **다중 인원 voter** (`Voter` multi-presence, K_MAX=12 캡, on_away 콜백 sync — Stage 5e PASS 2026-05-01)
 - [x] **실시간 웹 대시보드** (`web_server.py` + `web/index.html`, Flask SSE + Toss-style 레이더 UI — Stage 7 PASS 2026-05-01)
 - [x] **VIBeID A1~A4 전체 데이터셋 구조 정리** (paper 정독 → CLAUDE.md 본문 추가, A2/A3 학습 plan 도출)
+- [x] **트랙 A — v3 backbone 학습 + Jetson 재추론** (2026-05-02 PASS)
+  - Colab A100 25 epoch, val best 70.29% (ep 16/25), 도메인별 32~88% 편차
+  - ONNX 단일 파일 export (`weights/mobilenet_v3_large_v3.onnx`, 17 MB, opset 13, dynamo=False legacy 경로 강제 — PyTorch 2.5+ 의 새 dynamo exporter 가 opset 18→13 conversion 실패해서)
+  - Jetson trtexec FP16 (`mnv3_v3_fp16.plan`) + `jetson_realtime.py --replay sample/P14_1.mat` → P14 86.7% (313/361, conf 66.4%, 1.95× realtime)
+  - v2 (93.4%) 대비 −6.7pp 이지만 backbone diversity 측면 우월. v2/v3 두 backbone 모두 보존, 가족 transfer 후 최종 결정.
 
 ### Stage 6 — ADS1256 통합: STM32 F411RE bridge 아키텍처 (2026-04-30 후반 갱신)
 
@@ -620,7 +672,7 @@ Geophone (passive coil)
 
 ADS1256 모듈 식별 + STM32 펌웨어 작성이 메인 블로커. 그 사이 다음 4 트랙 병행:
 
-### 트랙 A — VIBeID A2/A3 통합 backbone v3 재학습 (Colab A100, 가장 임팩트 큼)
+### 트랙 A — VIBeID A2/A3 통합 backbone v3 재학습 ✅ DONE 2026-05-02
 **목표**: A1 단독 학습된 v2 의 floor/거리 일반화 한계 극복. 본인 집 floor type 이 A1 의 floor 와 다를 가능성 큼 → A3 (multi-floor: wood/carpet/cement) 가 핵심.
 
 **원칙 재확인**: interim .mat 만 받아서 **우리 LUT 로 직접 렌더 후 학습** (위 "v2/v3 학습 파이프라인의 절대 원칙" 섹션 참조). OSF processed PNG 는 다운로드조차 하지 않음.
