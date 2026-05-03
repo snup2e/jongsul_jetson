@@ -3,22 +3,24 @@
 > **Scope of this file**: 앞으로 할 일 + 절대 깨면 안 되는 원칙만. 완료된 단계의 검증 수치 / VIBeID 데이터셋 전체 구조 / MATLAB 파이프라인 정밀 사양 / 트랙 A·B 결과 상세는 → **`CLAUDE_ARCHIVE.md`** 참조.
 
 ## 현재 상태 (2026-05-03)
-- Stage 1~5d + 다중 인원 voter (5e) + 웹 대시보드 (7) + Track A (v3 backbone) + Track B (multi-presence 검증) **모두 PASS**
+- Stage 1~5d + 다중 인원 voter (5e) + 웹 대시보드 (7) + Track A (v3 backbone) + Track B (multi-presence 검증) + **Track C (STM32 bridge skeleton)** **모두 PASS**
 - raw .mat → GMM → CWT(cwt_fast) → LUT → TRT FP16 → top-1 → multi-presence voter → SSE → Toss-style 웹페이지 Jetson Nano 에서 end-to-end 작동
 - v2 검증 P14/P50/P100/P2 = 93~97%, v3 P14 = 86.7% (170-class trade-off), per-footstep 386 ms
 - **블로커**: ADS1256 모듈 도착 대기. 마감 2026-06.
 - GitHub: `snup2e/jongsul_jetson` (PUBLIC, weights+paper 포함, data/.mat 제외)
 
+### Track C 완료 (2026-05-03, commit f8fc46b)
+NUCLEO-F411RE 단독 bring-up Phase 0~4 모두 PASS:
+- Phase 0~1: CubeIDE 프로젝트 + USART2 tick (115200 → 921600 전환 확인)
+- Phase 2: PB1/PB6 GPIO_Output 핀 추가 (코드 토글 생략, Phase 5 SPI 통신 시 자동 검증 예정)
+- Phase 3: Binary frame format 송신 (SYNC 0xA5 0x5A | SEQ u16 LE | N=64 | int24 BE × N | CRC8 poly 0x07) — 가짜 ramp 데이터, 10 fps. 라이브 검증: SYNC 간격 198 byte, CRC fail 0, SEQ drops 0, ramp diff = 1.0 ± 0.0.
+- Phase 4: `python/stm32_source.py` (streaming source, MatFileSource API 호환) + `python/stm32_phase3_check.py` (one-shot frame 검증) + `resample_for_ads1256.py` 8/15 모드 추가 (max\|d\|=3.331e-16 vs scipy block reference)
+- 의의: ADS1256 도착 후 펌웨어에 SPI/EXTI 핸들러만 추가 + `web_server.py` 의 `MatFileSource → STM32Source` 한 줄 교체로 본 deployment 진입.
+
 ## 다음에 할 일 (우선순위 순)
 
 ### 센서 도착 전 — 컴퓨팅 안 쓰는 트랙
-1. **트랙 C: STM32 펌웨어 골격** (NUCLEO-F411RE 단독 bring-up, ADS1256 무관)
-   - C.1: CubeIDE 프로젝트 생성 + CubeMX 설정 (아래 "STM32 결정사항" 참조)
-   - C.2: USART2 1초 tick → `/dev/ttyACM0` 수신 확인
-   - C.3: PB1 (RESET) GPIO 토글 멀티미터 확인
-   - C.4: `python/stm32_source.py` 골격 — frame parser (SYNC/SEQ/CRC8) + int24 BE decoder
-   - C.5: `resample_for_ads1256.py` 에 폴리페이즈 8/15 모드 추가 + scipy reference 와 max\|d\| < 1e-15 검증
-2. **트랙 D: 가족 데이터 수집 protocol** (수집은 sensor 후, 문서/script 골격은 미리)
+1. **트랙 D: 가족 데이터 수집 protocol** (수집은 sensor 후, 문서/script 골격은 미리, 약 1일)
    - D.1: `docs/COLLECTION_PROTOCOL.md` — 가족 N명, 5분 × 3 세션 (신발/시간대), 라벨링 룰
    - D.2: `python/record_session.py` 골격 — STM32Source → 30초/5분 파일 저장 + 라이브 RMS
    - D.3: `docs/TRANSFER_PLAN.md` — head 교체 (1280→N+1, +1=unknown) vs embedding+centroid 비교 plan
@@ -115,10 +117,12 @@ python/
 ├── web/people.json         # pid → {name, emoji} (가족 시연 시 편집)
 ├── gmm_params.npz          # frozen GMM (P14 100s seed=0)
 ├── export_onnx.py          # .pth → 단일 .onnx
+├── stm32_source.py         # STM32 binary frame streaming source (MatFileSource API 호환) — 2026-05-03
+├── stm32_phase3_check.py   # Phase 3 frame format one-shot 검증 — 2026-05-03
 ├── ads1256_*.py            # Jetson-direct 폴백 자산
-└── resample_for_ads1256.py # StreamingPolyphase (16/15 검증됨, 8/15 추가 예정)
+└── resample_for_ads1256.py # StreamingPolyphase (16/15 + 8/15 둘 다 검증 완료)
 
-stm32/ads1256_bridge/       # CubeIDE 프로젝트 (작성 예정)
+stm32/ads1256_bridge/       # CubeIDE 프로젝트 — Phase 0~4 PASS, ADS1256 통신 코드는 Phase 5~7 에서
 ```
 
 ### Jetson `~/terra/` (flat 구조 — `python/` + `weights/` 평탄화)
