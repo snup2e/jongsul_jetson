@@ -9,6 +9,11 @@
 - **블로커**: ADS1256 모듈 도착 대기. 마감 2026-06.
 - GitHub: `snup2e/jongsul_jetson` (PUBLIC, weights+paper 포함, data/.mat 제외)
 
+### 하드웨어 식별
+- **ADC 모듈**: vctec.co.kr 8채널 24비트 ADC 보드 (상품코드 P000BATS) — 칩 ADS1256IDB (TI 정품 SSOP-28), 7.68 MHz 크리스탈, 정밀 voltage reference IC 내장 (SOIC-8), AVDD/DVDD LDO 분리 (SOT-223). PCB는 Waveshare High-Precision AD/DA Board ADC 부분과 회로 거의 동일 (회로도 비교용 → References).
+- **핀헤더 배치**: 좌측 SPI (5V / GND / SCLK / DIN / DOUT / DRDY / CS / PDWN), 우측 아날로그 (AIN0~AIN7 각 채널마다 GND 페어).
+- **지오폰**: SM-24 (28.8 V/m/s, DCR 375 Ω) — 외부 op-amp 없음 (옵션 B, 아래 STM32 결정사항 참조).
+
 ### Track C 완료 (2026-05-03, commit f8fc46b)
 NUCLEO-F411RE 단독 bring-up Phase 0~4 모두 PASS:
 - Phase 0~1: CubeIDE 프로젝트 + USART2 tick (115200 → 921600 전환 확인)
@@ -29,16 +34,24 @@ NUCLEO-F411RE 단독 bring-up Phase 0~4 모두 PASS:
 ### 센서 도착 후 — 순차 (S.1~S.10)
 | # | 작업 | 의존 |
 |---|---|---|
-| S.1 | ADS1256 모듈 식별 (Waveshare HAT vs generic) → 핀헤더 확정 | 도착 |
-| S.2 | STM32 펌웨어에 ADS1256 통신 추가 (RREG STATUS / Self-cal / RDATAC) | C.1~C.4 + S.1 |
+| S.1 | STM32 ↔ ADS1256 bring-up (substep 1a~1f, 아래) | 도착 |
+| S.2 | STM32 펌웨어에 ADS1256 통신 정식 통합 (Self-cal / RDATAC + EXTI) | S.1 |
 | S.3 | 15000 SPS sustained 30초 → frame 카운트 = 7031 ± 1 | S.2 |
 | S.4 | `stm32_source.py` 완성 + `stm32_validate.py` (scipy 8/15 reference 비교) | C.4 + S.3 |
-| S.5 | calibration: 30초 캡처 RMS vs `P14_1.mat` 첫 30초 RMS → scale 결정 | S.4 |
+| S.5 | calibration: 30초 캡처 RMS vs `P14_1.mat` 첫 30초 RMS → scale 결정 + PGA 튜닝 | S.4 |
 | S.6 | `web_server.py` 의 `MatFileSource` → `STM32Source` 교체 (한 줄) | S.5 |
 | S.7 | 본인 발걸음 raw → top-1 분포 spot-check (v2/v3 둘 다) | S.6 |
 | S.8 | 가족 데이터 수집 (D.1, D.2 protocol) — 약 1주 | D.* + S.6 |
 | S.9 | Transfer learning (head 교체 vs embedding) → 가정 deployment 정확도 평가 | D.3 + S.8 |
 | S.10 | 종설 발표 자료 (시연 영상 + accuracy table + 시스템 다이어그램) | 위 모두 |
+
+#### S.1 substep (ADS1256 bring-up)
+1. **1a**: 모듈에 5V/3.3V/GND + SPI 5선 (SCLK/DIN/DOUT/DRDY/CS) + RESET (PB1) + 1kΩ 댐핑 션트 1개 (코일 양단) 배선. 양쪽 1kΩ 직렬 ESD 보호는 선택 (5mA cap).
+2. **1b**: STM32 펌웨어에 SPI write/read 헬퍼만 먼저. RESET pin pulse 후 RREG STATUS (0x00) 읽기 → factory ID bits 7-4 = 0x3X 패턴 확인 (모듈 sanity check).
+3. **1c**: Init 시퀀스 작성 — RESET pin → WREG STATUS (BUFEN=0, ACAL=1) → WREG MUX (AIN0/AIN1) → WREG ADCON (PGA=8) → WREG DRATE (0xE0=15000 SPS) → SELFCAL → DRDY low 대기 → RDATAC.
+4. **1d**: USART2 921600으로 raw 24-bit 샘플 노트북 출력 (Track C frame format 그대로 사용 가능). PuTTY/SerialPlot 또는 임시 Python script로 라이브 waveform 모니터링.
+5. **1e**: 발 굴러보면서 saturation 확인 → PGA 튜닝. 시작 PGA=8 (±625 mV FS). 작으면 PGA=16 (±312.5 mV FS). PGA=32 (±156 mV FS) 이상은 큰 발걸음 impact 클리핑 위험 — 야외 같은 weak signal 환경에서만.
+6. **1f**: 일관된 신호 캡처되면 EXTI0 (PB0 falling, DRDY) 핸들러로 전환 → S.2 정식 통합.
 
 ### 폴백
 - STM32 루트 막힘 시 → Jetson-direct ADS1256 (`python/ads1256_source.py`, `ads1256_bench.py`, `resample_for_ads1256.py` 16/15) 자산 그대로 활용
@@ -164,18 +177,61 @@ raw .mat (8 kHz)
 - **보드**: NUCLEO-F411RE
 - **펌웨어 스타일**: HAL (CubeIDE — 임베디드시스템설계 수업 기반)
 - **전송 경로**: ST-Link VCP (UART2 → ST-Link MCU 자동 USB CDC) — 케이블 1개로 빌드/플래시/통신/전원 전부.
-- **활성**: SPI1 (full-duplex master, 8-bit MSB, CPOL=0/CPHA=2 Edge, NSS Disable, prescaler /64), GPIO (PB6=CS, PB1=RESET), EXTI0 (PB0 falling, no pull), USART2 (Async, 921600 8-N-1, NVIC priority 5), NVIC (EXTI0 priority 0)
+- **활성**: SPI1 (full-duplex master, 8-bit MSB, CPOL=0/CPHA=2 Edge, NSS Disable, prescaler /64 → ~1.5625 MHz), GPIO (PB6=CS, PB1=RESET), EXTI0 (PB0 falling, no pull), USART2 (Async, 921600 8-N-1, NVIC priority 5), NVIC (EXTI0 priority 0)
 - **비활성**: USB_OTG_FS / USB_DEVICE / CDC class 미들웨어 모두 깔지 않음
 - **데이터 경로**:
   ```
-  Geophone → AIN0/AIN1 (BUFEN=1) → ADS1256 (15000 SPS RDATAC, DRDY 66.67 µs)
+  Geophone (SM-24, 28.8 V/m/s, DCR 375 Ω) ─┬─[1kΩ 댐핑 션트]─┬─ AIN0/AIN1 차분
+                                              (양쪽 1kΩ 직렬 ESD 선택)
+    → ADS1256 (BUFEN=0, PGA=8, 15000 SPS RDATAC, DRDY 66.67 µs)
     → STM32 SPI1 ~1.5 MHz, EXTI0 (DRDY), 링버퍼 SPSC
     → USART2 921600 binary frame [SYNC 0xA5 0x5A | SEQ uint16 LE | N=64 | int24 BE × N | CRC8]
     → Jetson /dev/ttyACM0 → STM32Source.chunks_raw()
     → int24 decode → 폴리페이즈 8/15 → 8 kHz float32
     → (이하 기존 파이프라인 동일)
   ```
+- **ADS1256 init 시퀀스** (S.1c 펌웨어):
+  ```
+  1. RESET pin low → high (auto self-cal 트리거)
+  2. WREG STATUS  (BUFEN=0, ACAL=1)
+  3. WREG MUX     (AIN0/AIN1 differential)
+  4. WREG ADCON   (PGA=8, SDCS=00)
+  5. WREG DRATE   (0xE0 = 15000 SPS)
+  6. SELFCAL      (config 변경 후 필수)
+  7. DRDY low 대기
+  8. RDATAC       (continuous mode 진입)
+  ```
+  S.1b sanity check: RREG STATUS (0x00) → factory ID bits 7-4 = 0x3X 확인.
+- **외부 회로 = 1kΩ 댐핑 션트 1개 표준** (옵션 B = 외부 op-amp 없음, ADS1256 PGA로만 처리):
+  - **댐핑 1kΩ (코일 양단)**: SM-24 open-circuit 댐핑 0.27 → ~0.55, 10 Hz 공진 ringing 억제 + 주파수 응답 평탄화. VIBeID 셋업 (외부 op-amp 거친 신호로 학습) 과의 ringing 분포 미스매치 방지.
+  - **양쪽 1kΩ 직렬 보호 (선택)**: ESD/큰 전압 입력 시 ADS1256 입력 전류 5 mA 이하로 제한. 1kΩ × ~50 pF = 50 ns RC, 15 kHz 샘플 settling 충분.
+  - **DC 바이어스 회로 없음**: switched-cap self-bias (BUFEN=0, Zeff ~33 kΩ @ PGA=8) + 코일 DCR 375 Ω 로 AIN0/AIN1 자연스럽게 mid-rail 안착 (seismometer.info, Seisberry 동일 접근).
+  - S.5 에서 P14_1.mat RMS+스펙트럼 비교 후 이상 시 단계적 강화 옵션: AINCOM→2.5V 분압 강제 bias.
+- **PGA 튜닝 정책** (옵션 B 핵심): 외부 op-amp 없이 ADS1256 PGA로만 게인 처리.
+  - PGA=8 → ±625 mV FS (differential FSR = ±2·Vref/PGA = ±5V/PGA, Vref=2.5V).
+  - 시작 PGA=8 → 신호 너무 작으면 PGA=16 (±312.5 mV FS) 까지. PGA=32 (±156 mV FS) 이상은 큰 발걸음 impact 클리핑 위험 — 야외 weak signal 환경에서만 검토.
+  - 근거: ADS1256 24-bit + PGA 가 ADS1115 16-bit + 외부 op-amp 보다 noise-free bits 동등 이상. seismometer.info / Seisberry 모두 외부 amp 없이 운용. Fine-tuning 으로 분포 차이 흡수.
+- **VIBeID 셋업과의 차이** (논문 6.2.1 기준, 펌웨어/모델 설계에 영향):
+  - VIBeID: SM-24 + 외부 pre-amp gain 10 + 16-bit Logic Sound Card HAT (8 kHz, RPi 3B+).
+  - VIBeID raw waveform 진폭 (외부 amp 거친 후): Carpet ±0.5 V, Cement ±0.2 V, Outdoor ±0.04 V → raw geophone 출력 추정 ±50 mV / ±20 mV / ±4 mV.
+  - 우리: 외부 amp 없음 → ADS1256 PGA 가 그 자리를 대신. PGA=8 에서 carpet 50 mV / 625 mV = 8% FS, cement 3.2% FS. PGA=16 으로 올리면 carpet 16% FS, cement 6.4% FS.
+- **SPI 타이밍 제약** (ADS1256 datasheet):
+  - CLKIN = 7.68 MHz (확인됨), SCLK 최대 = 4 / fCLKIN = **1.92 MHz**.
+  - STM32 SPI prescaler /64 (PCLK2 100 MHz → 1.5625 MHz) **안전**. /32 (3.125 MHz) 는 datasheet 위반 — 사용 금지.
+  - DRDY low 후 32 DRDY 주기 (= 2.13 ms @ 15000 SPS) 안에 SCLK 시작해야 RDATAC 데이터 유효 — 다른 ISR 이 EXTI0 막으면 안 됨 (EXTI0 priority 0 이미 설정).
 - **샘플레이트**: 15000 SPS native (DRATE=0xE0). Plan B = 7500 SPS (폴리페이즈 16/15 로 스왑, 학습 자산 영향 0).
+
+---
+
+## References (외부 자료)
+
+- **VIBeID 논문 hardware section**: 6.2.1 (geophone 28.8 V/m/s + 외부 op-amp gain 10 + 16-bit sound card HAT 8 kHz, RPi 3B+ BCM2837B0).
+- **유사 프로젝트** (ADS1256 PGA-only / 외부 op-amp 없는 셋업):
+  - seismometer.info — SM-24 + ADS1115 셋업: <https://www.seismometer.info/beta-version-v0-1-of-seismometer-based-on-raspberry-pi-ads1115-and-sm-24/>
+  - Seisberry — 3-axis seismograph + ADS1256 Waveshare HAT: <https://erellaz.com/blog/seisberry/seisberry-install/>
+  - LiU 코끼리 진동 모니터링 (PGA=32 사례): <https://liu.diva-portal.org/smash/get/diva2:1784892/FULLTEXT01.pdf>
+  - CEDAS_geo (PGA=16 학술 사례): <https://pmc.ncbi.nlm.nih.gov/articles/PMC11243846/>
+- **Waveshare High-Precision AD/DA 회로도** (vctec P000BATS PCB와 ADC 부분 거의 동일): <https://www.waveshare.com/w/upload/0/03/High-Precision-AD-DA--Schematic.pdf>
 
 ---
 
