@@ -165,6 +165,16 @@ def main():
         + 0.1 * rng.standard_normal(n_3750)
     )
 
+    # 15000 SPS (ADS1256 native via STM32 bridge) -> 8000 Hz, p=8, q=15
+    fs_in_15000 = 15000
+    n_15000 = int(args.seconds * fs_in_15000)
+    t_15000 = np.arange(n_15000) / fs_in_15000
+    sig_15000 = (
+        0.5 * np.sin(2 * np.pi * 100 * t_15000)
+        + 0.3 * np.sin(2 * np.pi * 500 * t_15000 + 0.7)
+        + 0.1 * rng.standard_normal(n_15000)
+    )
+
     # Chunk size patterns to exercise edge cases
     chunk_patterns = [
         1,           # one sample at a time
@@ -185,9 +195,15 @@ def main():
         "T2 3750->8000", p=32, q=15, x=sig_3750, chunk_sizes_list=chunk_patterns,
     ))
 
+    overall.append(_round_trip_check(
+        "T1b 15000->8000 (STM32 bridge)", p=8, q=15, x=sig_15000,
+        chunk_sizes_list=chunk_patterns,
+    ))
+
     # T3: frequency response sanity
     overall.append(_freq_response_check("T1 7500->8000", p=16, q=15, fs_in=7500))
     overall.append(_freq_response_check("T2 3750->8000", p=32, q=15, fs_in=3750))
+    overall.append(_freq_response_check("T1b 15000->8000", p=8, q=15, fs_in=15000))
 
     # T5: optional real geo_data slice
     if args.mat:
