@@ -43,6 +43,14 @@ PAYLOAD_N = 64              # samples per frame
 DEFAULT_FS_IN = 15000       # ADS1256 native after STM32 bring-up
 DEFAULT_FS_OUT = 8000       # what the rest of the pipeline expects
 
+# S.5 calibration (2026-05-10): VIBeID 셋업 (외부 op-amp gain 10 + sound card V) 와
+# 진폭 분포 일치시키는 scale. 우리 = ADS1256 PGA=16 단독 (amp 없음).
+# scale = ADS1256 LSB voltage * VIBeID amp gain
+#       = (0.3125 V / 8388608) * 10
+#       = 3.7253e-7 V/LSB
+# 측정값 (by-peak) 3.19e-7 와 17% 안 일치. 가족 deployment fine-tune 단계에서 재조정 가능.
+CALIBRATED_SCALE = 3.7253e-7
+
 
 def crc8(data: bytes) -> int:
     """CRC-8, poly=0x07, init=0x00, no reflect, no xor-out.
@@ -135,6 +143,7 @@ class STM32Source:
         self.frames_bad_n = 0
         self.bytes_dropped = 0
         self.seq_drops = 0
+        self.resets = 0          # STM32 reset events (seq << last_seq, gap > RESET_GAP)
         self._last_seq = None
 
     # ------------------------------------------------------------
@@ -178,11 +187,22 @@ class STM32Source:
             self.frames_bad_crc += 1
             return None
 
-        # SEQ drop check (uint16 wraparound aware)
+        # SEQ drop check (uint16 wraparound aware).
+        # Standard half-wrap heuristic: if the forward gap exceeds half the
+        # wraparound range, the stream most likely restarted (STM32 brownout /
+        # USB re-enum / power cycle). Count that as a reset rather than tens
+        # of thousands of "lost" frames. Real frame loss within continuous
+        # streaming gives gap in the 1-100 range; reset gives gap in the
+        # 50000+ range. (After USB re-enum, seq may already be 100-2000+
+        # before host reads, so we cannot rely on seq < small.)
         if self._last_seq is not None:
             expected = (self._last_seq + 1) & 0xFFFF
             if seq != expected:
-                self.seq_drops += (seq - expected) & 0xFFFF
+                gap = (seq - expected) & 0xFFFF
+                if gap > 32768:
+                    self.resets += 1
+                else:
+                    self.seq_drops += gap
         self._last_seq = seq
 
         samples = _decode_int24_be(frame[5:5 + n * 3], n)
@@ -284,6 +304,7 @@ class STM32Source:
             "frames_bad_n": self.frames_bad_n,
             "bytes_dropped": self.bytes_dropped,
             "seq_drops": self.seq_drops,
+            "resets": self.resets,
         }
 
 
@@ -332,8 +353,8 @@ def _selftest(args):
     print("  measured rate: {:.1f} sps  (target {} sps)".format(rate, expected_rate))
     print("  frames OK: {}".format(s["frames_ok"]))
     print("  frames bad CRC: {}, bad N: {}".format(s["frames_bad_crc"], s["frames_bad_n"]))
-    print("  SEQ drops: {}, bytes dropped (resync): {}".format(
-        s["seq_drops"], s["bytes_dropped"]
+    print("  SEQ drops: {}, resets: {}, bytes dropped (resync): {}".format(
+        s["seq_drops"], s["resets"], s["bytes_dropped"]
     ))
 
     if len(out) >= 6:

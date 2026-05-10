@@ -39,6 +39,17 @@ import numpy as np
 from scipy import signal as ss
 
 
+# numpy >= 1.20 has stride_tricks.sliding_window_view; Jetson 의 1.19.5 는 없음.
+# 동일 동작 (N, K) 슬라이딩 윈도우 뷰를 as_strided 로 fallback.
+def _sliding_window_view(arr, K):
+    try:
+        return np.lib.stride_tricks.sliding_window_view(arr, K)
+    except AttributeError:
+        n = len(arr) - K + 1
+        s = arr.strides[0]
+        return np.lib.stride_tricks.as_strided(arr, shape=(n, K), strides=(s, s))
+
+
 # ============================================================
 # Streaming polyphase resampler
 # ============================================================
@@ -97,7 +108,7 @@ class StreamingPolyphase:
         buf = np.concatenate([self.state, x])
         N = len(x)
         # windows[n, r] = buf[n + r], shape (N, K)
-        windows = np.lib.stride_tricks.sliding_window_view(buf, self.K)
+        windows = _sliding_window_view(buf, self.K)
         # out_up[n, k] = sum_r subfilters[k, K-1-r] * windows[n, r]
         out_up = windows @ self._subf_rev.T  # (N, p)
         # Interleave to scalar upsampled stream y_up[n*p + k]

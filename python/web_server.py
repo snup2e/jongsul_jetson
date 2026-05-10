@@ -183,14 +183,23 @@ def run_real_pipeline(args, broker, presence, voter):
     `voter` is created in main() and shared with PresenceTracker so its
     confirmed-set stays in sync with presence on away events.
     """
-    from jetson_realtime import MatFileSource, StreamingSmoother, SlidingDetector
+    from jetson_realtime import StreamingSmoother, SlidingDetector
     from extract import load_gmm_npz
 
-    src = MatFileSource(
-        args.replay, fs=8000,
-        chunk_size=args.chunk_size,
-        realtime=args.realtime,
-    )
+    if args.stm32:
+        from stm32_source import STM32Source, CALIBRATED_SCALE
+        src = STM32Source(
+            port=args.stm32_port,
+            chunk_size=args.chunk_size,
+            scale=CALIBRATED_SCALE,
+        )
+    else:
+        from jetson_realtime import MatFileSource
+        src = MatFileSource(
+            args.replay, fs=8000,
+            chunk_size=args.chunk_size,
+            realtime=args.realtime,
+        )
     print("[stream] " + src.info())
 
     smoother = StreamingSmoother(span=5)
@@ -413,6 +422,10 @@ def main():
     ap.add_argument("--replay", help=".mat file to replay (omit for --demo)")
     ap.add_argument("--demo", action="store_true",
                     help="Fake events on a timer (no TRT/scipy needed)")
+    ap.add_argument("--stm32", action="store_true",
+                    help="Live source: STM32 ADS1256 bridge over USB serial")
+    ap.add_argument("--stm32-port", default=None,
+                    help="STM32 serial port (default: auto-detect ST-Link VCP)")
     ap.add_argument("--plan",
                     default=os.environ.get("TERRA_TRT_PLAN", "mnv3_v2_fp16.plan"))
     ap.add_argument("--gmm",
@@ -429,8 +442,8 @@ def main():
     ap.add_argument("--port", type=int, default=8000)
     args = ap.parse_args()
 
-    if not args.replay and not args.demo:
-        ap.error("specify --replay <mat> for real pipeline, or --demo for UI dev")
+    if not (args.replay or args.demo or args.stm32):
+        ap.error("specify one of: --replay <mat>, --demo, or --stm32")
 
     broker = EventBroker()
     people = load_people_map()
