@@ -234,8 +234,14 @@ def run_real_pipeline(args, broker, presence, voter):
         from jetson_infer import TRTEngine, to_input
 
         engine = TRTEngine(args.plan)
+        # Warmup: first inference after engine load triggers CUDA JIT + memory
+        # allocation (~2-5s). If we let the producer start streaming first, that
+        # cold-start happens mid-flow and the sample_queue floods. Burn it now.
+        warmup_x = np.zeros((1, 3, 224, 224), dtype=np.float32)
+        for _ in range(3):
+            _ = engine.infer(warmup_x)
         engine_ready.set()
-        print("[infer] engine ready on consumer thread")
+        print("[infer] engine ready on consumer thread (warmed up)")
 
         def process_footstep(fp):
             coeffs = fast_cwt(fp)
@@ -246,6 +252,8 @@ def run_real_pipeline(args, broker, presence, voter):
             p = e / e.sum()
             top1 = int(p.argmax())
             conf = float(p.max())
+            if args.test_pin_pid is not None:
+                top1 = args.test_pin_pid
             ts = time.time()
             stats["footsteps"] += 1
 
@@ -436,6 +444,11 @@ def main():
     ap.add_argument("--vote-k", type=int, default=5)
     ap.add_argument("--vote-m", type=int, default=3)
     ap.add_argument("--vote-conf", type=float, default=0.50)
+    ap.add_argument("--test-mode", action="store_true",
+                    help="Demo recording: force-confirm every footstep (voter -> K=1/M=1/conf=0)")
+    ap.add_argument("--test-pin-pid", type=int, default=None,
+                    help="Demo recording: force all events to this person_id (e.g. 0). "
+                         "Overrides model output so card stays consistent under domain shift.")
     ap.add_argument("--away-after", type=int, default=300,
                     help="Seconds without footsteps before person → away")
     ap.add_argument("--host", default="0.0.0.0")
@@ -444,6 +457,14 @@ def main():
 
     if not (args.replay or args.demo or args.stm32):
         ap.error("specify one of: --replay <mat>, --demo, or --stm32")
+
+    if args.test_mode:
+        args.vote_k = 1
+        args.vote_m = 1
+        args.vote_conf = 0.0
+        print("[test-mode] voter forced to K=1/M=1/conf=0 (every footstep auto-confirms)")
+    if args.test_pin_pid is not None:
+        print("[test-mode] pinning all events to person_id={}".format(args.test_pin_pid))
 
     broker = EventBroker()
     people = load_people_map()

@@ -70,7 +70,7 @@ python3 record_session.py --pid mom --session 3 --duration 300 --outdir data/rec
   - ONNX export (opset 13 단일 파일)
 
 ### Phase 4 — 배포 + 라이브 검증 (~30분)
-1. `weights/mobilenet_v3_family_v1.onnx` Jetson 으로 scp (IP 그날 확인 — DHCP).
+1. `weights/mobilenet_v3_family_v1.onnx` Jetson 으로 scp: `scp E:/Terra/weights/mobilenet_v3_family_v1.onnx snup2@snup2-desktop:~/terra/`
 2. Jetson 에서 `trtexec --onnx=mobilenet_v3_family_v1.onnx --fp16 --saveEngine=mnv3_family_v1_fp16.plan --workspace=512`.
 3. `python/web/people.json` 편집: `{0: {name: "나", emoji: "🧑"}, 1: {name: "엄마", emoji: "👩"}, ...}`.
 4. `web_server.py` model 경로 갱신 (또는 CLI flag), unknown threshold 적용 (max-prob < 0.7 → "unknown" 표시).
@@ -140,8 +140,23 @@ python3 -m pip install --user --no-build-isolation pycuda
 ### Claude Code / VS Code Remote-SSH **둘 다 안 됨** (glibc 2.27)
 - 워크플로우: Windows 쪽 Claude Code + SSH 터미널 + scp. `JETSON_SETUP.md` 의 Claude Code 섹션 무시.
 
+### Jetson 접속 — 항상 `snup2@snup2-desktop` 사용 (IP 박지 말 것)
+- Jetson 은 Tailscale + MagicDNS 로 안정 hostname `snup2-desktop` 가짐 (집/학교/외부 어디서든 동일). DHCP IP 는 더 이상 묻지 않음.
+- 모든 ssh/scp 명령: `ssh snup2@snup2-desktop`, `scp <file> snup2@snup2-desktop:~/terra/`
+- ~/.ssh/config 에 `Host jetson` alias 박아두면 `ssh jetson` / `scp <file> jetson:~/terra/` 로 더 짧게.
+
 ### CUDA 스레드 binding (web_server.py)
 - `pycuda.autoinit` 가 import 스레드에 context 묶음 → consumer 스레드에서 `from jetson_infer import TRTEngine` + `TRTEngine()` + `engine.infer()` 모두 처리해야 함. main 스레드 import 시 `invalid resource handle`.
+
+### TRT 콜드스타트 — engine.infer() 워밍업 필수 (2026-05-11 추가)
+- 첫 inference 가 CUDA JIT + 메모리 할당으로 2~5초 걸림. 그동안 producer 가 chunk 를 계속 큐에 밀어 넣어 startup 직후 `queue_depth` 폭증.
+- 해결: `TRTEngine(plan)` 직후 `engine_ready.set()` 전에 `np.zeros((1,3,224,224), float32)` 로 dummy inference 3회. `web_server.py` 의 `consumer()` 에 이미 박혀있음. 다른 TRT 사용처 추가 시 동일 패턴 적용.
+
+### web_server.py 영상/시연용 flag (2026-05-11 추가)
+- **`--test-mode`**: voter K=1/M=1/conf=0 강제 → 매 footstep 마다 `confirm` 이벤트 발사. 가족 transfer 학습 전 본인 발걸음으로 시연/영상 찍을 때 (현재 v2 100-class 모델이라 본인은 OOD → pid 가 P14/P63 등으로 flip) UI 가 동작하는 모습 보여주는 용도.
+- **`--test-pin-pid N`**: 모든 이벤트의 person_id 를 N 으로 override (모델 출력 무시). 카드 한 개로 일관된 시연.
+- 사용 예: `python3 web_server.py --stm32 --test-mode --test-pin-pid 0`
+- ⚠️ production (가족 transfer 후) 에선 둘 다 끄기. 둘 다 안 쓰면 default voter (K=5/M=3/conf=0.5) 그대로 동작.
 
 ---
 
@@ -195,8 +210,8 @@ E:\STM32CubeIDE\workspace\jetson_bridge\    # 실제 CubeIDE 프로젝트 위치
 - **pyserial 설치**: `pip3 install --user pyserial`
 - v3 plan 빌드:
   ```bash
-  scp E:/Terra/weights/mobilenet_v3_large_v3.onnx snup2@121.254.39.88:~/terra/
-  ssh snup2@121.254.39.88 "cd ~/terra && trtexec --onnx=mobilenet_v3_large_v3.onnx --fp16 --saveEngine=mnv3_v3_fp16.plan --workspace=512"
+  scp E:/Terra/weights/mobilenet_v3_large_v3.onnx snup2@snup2-desktop:~/terra/
+  ssh snup2@snup2-desktop "cd ~/terra && trtexec --onnx=mobilenet_v3_large_v3.onnx --fp16 --saveEngine=mnv3_v3_fp16.plan --workspace=512"
   ```
 
 ---
