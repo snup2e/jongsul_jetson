@@ -277,6 +277,84 @@ def apply_frozen_gmm(geo_data: np.ndarray, params: dict, fs: int = 8000) -> np.n
     return extract_footsteps(g, indices, labels)
 
 
+# ---------- Hilbert-envelope detector (replacement for frozen GMM) ----------
+
+def apply_envelope_detector(
+    geo_data: np.ndarray,
+    fs: int = 8000,
+    k_mad: float = 8.0,
+    env_smooth_ms: float = 30.0,
+    min_sep_ms: float = 120.0,
+    align_radius_ms: float = 30.0,
+    footfall_len: int = 1500,
+    tukey_alpha: float = 0.5,
+    peak_offset: int = 400,
+) -> np.ndarray:
+    """Hilbert-envelope based footstep detection. Drop-in replacement for
+    apply_frozen_gmm; returns the same (M, 1500) Tukey-windowed crops.
+
+    Algorithm:
+      1. matlab_smooth (span=5)              # same as GMM path
+      2. |analytic signal|                   # Hilbert envelope
+      3. moving-average smooth (env_smooth_ms)
+      4. adaptive threshold = median + k_mad * MAD * 1.4826   # robust σ
+      5. scipy.signal.find_peaks(height=thr, distance=min_sep_ms)
+      6. snap each peak to argmax(|signal|) within ±align_radius_ms
+         (matches Event_Extract.m's inner peak refinement)
+      7. extract 1500-sample slice centered at peak-400, Tukey window,
+         zero-pad to footfall_len.
+
+    Defaults validated on P14 (84.89% v2-classifier accuracy vs 83.38% GMM)
+    and on our 30 s STM32 capture (25 detections vs 10, no quiet-region FPs).
+    """
+    g = matlab_smooth(geo_data, span=5).ravel()
+    L = len(g)
+
+    env = np.abs(ss.hilbert(g))
+    n_smooth = max(1, int(env_smooth_ms * 1e-3 * fs))
+    if n_smooth > 1:
+        kern = np.ones(n_smooth) / n_smooth
+        env = np.convolve(env, kern, mode="same")
+
+    med = float(np.median(env))
+    mad = float(np.median(np.abs(env - med)))
+    thr = med + k_mad * mad * 1.4826
+
+    min_dist = max(1, int(min_sep_ms * 1e-3 * fs))
+    env_peaks, _ = ss.find_peaks(env, height=thr, distance=min_dist)
+
+    if len(env_peaks) == 0:
+        return np.zeros((0, footfall_len))
+
+    radius = max(1, int(align_radius_ms * 1e-3 * fs))
+    full_window = ss.windows.tukey(footfall_len, tukey_alpha)
+    abs_g = np.abs(g)
+
+    out = []
+    for p in env_peaks:
+        lo = max(0, int(p) - radius)
+        hi = min(L, int(p) + radius)
+        mn = int(np.argmax(abs_g[lo:hi])) + lo
+
+        strt = mn - peak_offset
+        stop = strt + footfall_len
+        wnd = full_window.copy()
+        if strt < 0:
+            wnd = wnd[: stop - 0]
+            strt = 0
+        if stop > L:
+            wnd = wnd[: L - strt]
+            stop = L
+
+        seg = g[strt:stop]
+        windowed = wnd * seg
+        row = np.zeros(footfall_len)
+        row[: len(windowed)] = windowed
+        out.append(row)
+
+    return np.asarray(out)
+
+
 # ---------- Footstep extraction (Event_Extract.m) ----------
 
 def extract_footsteps(signal_arr: np.ndarray, indices: np.ndarray,

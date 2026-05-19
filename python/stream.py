@@ -19,7 +19,7 @@ from typing import Tuple
 import numpy as np
 
 from cwt_fast import cwt as fast_cwt
-from extract import apply_frozen_gmm, load_gmm_npz
+from extract import apply_envelope_detector, apply_frozen_gmm, load_gmm_npz
 from render_lut import cwt_to_rgb_direct
 
 
@@ -38,13 +38,27 @@ def footsteps_to_inputs(footsteps: np.ndarray, size: Tuple[int, int] = (224, 224
     return out
 
 
-def raw_to_inputs(geo_data: np.ndarray, gmm_params: dict,
-                  size: Tuple[int, int] = (224, 224)) -> Tuple[np.ndarray, np.ndarray]:
+def raw_to_inputs(geo_data: np.ndarray, gmm_params=None,
+                  size: Tuple[int, int] = (224, 224),
+                  detector: str = "envelope") -> Tuple[np.ndarray, np.ndarray]:
     """Full pipeline for a chunk of raw signal.
+
+    detector="envelope" (default, 2026-05-12+): Hilbert envelope + peak align.
+        Validated on P14 (84.89% v2 acc) and our 30s STM32 capture (resolves
+        dense-burst miss + quiet-region FP that frozen GMM has). gmm_params
+        argument is ignored.
+    detector="gmm": frozen GMM path (legacy / validation). gmm_params required.
 
     Returns (footsteps (M, 1500), inputs (M, H, W, 3) uint8).
     """
-    footsteps = apply_frozen_gmm(geo_data, gmm_params)
+    if detector == "envelope":
+        footsteps = apply_envelope_detector(geo_data)
+    elif detector == "gmm":
+        if gmm_params is None:
+            raise ValueError("detector='gmm' requires gmm_params")
+        footsteps = apply_frozen_gmm(geo_data, gmm_params)
+    else:
+        raise ValueError("unknown detector: {!r}".format(detector))
     inputs = footsteps_to_inputs(footsteps, size=size)
     return footsteps, inputs
 

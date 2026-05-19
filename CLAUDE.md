@@ -35,51 +35,87 @@
 
 **S.6 SEQ drop 이슈 — 해결됨 (2026-05-10):** 30초 capture 에서 SEQ drops 0, 7997.5 sps. 원인은 STM32 USB 가 SSD 와 같은 Jetson 내부 hub 다리에 꽂혀 있어 SSD 전류 스파이크 시 STM32 brownout reset. **운영 룰**: STM32 USB 는 항상 SSD 와 다른 물리 포트에. 배럴잭 5V/4A 자체 용량은 충분.
 
-## 다음에 할 일 — **2026-05-11 가족 4명 모이는 날 plan** (총 ~2.5~3시간)
+## 다음에 할 일 — **가족 4명 모이는 날 plan** (날짜 미정, 총 ~1.5~2시간)
 
-### Phase 1 — 셋업 (~10분)
+> 도메인 다양성 포기 결정 (2026-05-19): "집 현관에 설치된 시스템" 으로 시연 컨텍스트 고정. 신발+양말 두 조건만 within-person 분산 (3세션 × 5분/인). pids = `김건형, 김범수, 성재용, 박지훈`, noise 는 unknown 에 병합 (5-class).
+
+### Phase 0 — 사전 (가족 모이기 1~3일 전, 본인만, ~15분)
+1. **30초 sanity** (전체 시스템 검증):
+   ```bash
+   python3 record_session.py --pid presanity --session 0 --duration 30 --outdir data/recordings
+   ```
+   PASS (drops=0, resets≤1, footsteps>0) 확인. NG 면 가족 모이기 전 해결.
+2. **양말 진폭 검증** (envelope detector threshold 가족 양말에도 통하는지):
+   ```bash
+   python3 record_session.py --pid presanity --session sock --duration 30 --outdir data/recordings
+   ```
+   footsteps detected ≥3 면 OK. 0~2 면:
+   - 1차 폴백: `extract.apply_envelope_detector(k_mad=6.0)` 으로 낮춤 (현재 8.0) → CLAUDE.md 추론 파이프라인의 호출 지점 갱신.
+   - 2차 폴백: 양말 세션 skip, 신발만 3 세션.
+
+### Phase 1 — 셋업 (가족 모인 날, ~10분)
 1. Jetson 부팅, STM32 USB 연결 (SSD 와 다른 포트 — 운영 룰).
-2. 30초 sanity check: `python3 record_session.py --pid me --session 0 --duration 30 --outdir data/recordings`. PASS (drops=0, resets≤1, footsteps>0) 확인.
-3. 가족 protocol 짧게 설명: 지오폰 위/근처 5분 자연스럽게 걷기. 세션마다 신발/페이스 약간 다르게.
+2. **지오폰 배치**: 현관과 거실 경계의 wood floor 위 (tile 위/카펫 NG). Walking path 1m 이내. 시연 후에도 같은 자리 유지.
+3. 30초 sanity check (Phase 0 의 1번과 동일) 한 번 더 — 셋업 이동 후 재확인.
+4. 가족에게 protocol 짧게 설명: "센서 옆 1m 안에서 신발장 ↔ 거실 자연스럽게 왕복. 의식하지 말고 평소처럼."
 
-### Phase 2 — 수집 (~1시간 30분, 인당 ~19분)
-인원: me, mom, dad, sis (사용자 가족 구성에 따라 pid 조정).
-세션: 1, 2, 3 (총 12 세션 = 60분 녹음 + 사이 휴식 ~16분).
+### Phase 2 — 수집 (~60분 녹음 + 30분 전환/버퍼)
+4명 × 3세션 × 5분.
 ```bash
-# 예시 (각 인원 × 3 세션)
-python3 record_session.py --pid mom --session 1 --duration 300 --outdir data/recordings
-python3 record_session.py --pid mom --session 2 --duration 300 --outdir data/recordings
-python3 record_session.py --pid mom --session 3 --duration 300 --outdir data/recordings
-# (다음 사람으로 교체 후 반복)
+# pid 별로 신발 갈아신기 사이클 — 1명씩 끝내고 다음 사람
+python3 record_session.py --pid 김건형 --session 1 --duration 300 --outdir data/recordings  # 신발 평상
+python3 record_session.py --pid 김건형 --session 2 --duration 300 --outdir data/recordings  # 양말 평상
+python3 record_session.py --pid 김건형 --session 3 --duration 300 --outdir data/recordings  # 신발 다른 페이스
+# 김범수, 성재용, 박지훈 도 동일 3세션
 ```
-세션마다 footsteps detected 확인 (50~250 범위면 OK). 일부 세션이 너무 적으면 (< 30) 그 세션만 재수집.
+세션마다 footsteps detected 확인 (50~250 범위면 OK). < 30 인 세션은 그 세션만 재수집.
+
+**조건 매핑** (세션 번호 → 조건, 노트로만 관리, 모델 라벨은 사람 1개로):
+- S1: 평소 신는 신발, 평상 페이스
+- S2: 양말 (Phase 0 에서 검증된 경우만), 평상 페이스
+- S3: 신발 같은 종류 다른 페이스 (S1 보다 약간 빨리 또는 천천히)
+
+**Noise 세션** (마지막, 본인이 진행, ~5~10분):
+```bash
+python3 record_session.py --pid noise --session 1 --duration 300 --outdir data/recordings
+```
+의도적 비-발걸음 임펄스 (분당 10~20회 분산):
+- 문 닫기 (~10회) / 책/펜 떨어뜨리기 (~10회) / 의자 끌기 / 책상·벽 두드리기 / 진공청소기 30초
+
+→ D.3 에서 `--noise-pid noise` 가 unknown 으로 병합. CNN 의 OOD overconfidence (door slam → "김건형 confidence 0.9" 등) 차단.
 
 ### Phase 3 — 데이터 prep + transfer 학습 (~20분)
-**아직 작성 안 된 파일 — 가족 모이기 전 이른 아침에 미리 작성하면 좋음**:
-- **D.3 `python/prep_transfer_dataset.py`** (Windows 측):
-  - `data/recordings/<pid>/*.npz` 의 raw_int32 → `apply_frozen_gmm(geo, gmm_params.npz)` → footsteps (M, 1500)
-  - `cwt_fast.cwt` → `render_lut.cwt_to_rgb_direct` → (M, 224, 224, 3) uint8
-  - VIBeID P14 footsteps 도 동일 파이프라인으로 unknown 클래스 (라벨 N) 추가
-  - 출력: `data/transfer/family_v1.npz` with `X (Total, 224, 224, 3) uint8`, `y (Total,) int`, `pid_map (dict)` (예: {0:'me', 1:'mom', 2:'dad', 3:'sis', 4:'unknown'})
-  - 80/20 train/val split (per-pid stratified)
-- **D.4 Colab 노트북** `notebooks/transfer_family_v1.ipynb`:
-  - v3 backbone (`mobilenet_v3_large_v3.onnx` 의 PyTorch 버전 또는 v3 best.pth) 로드
-  - backbone 전체 freeze, classifier[3] 1280→5 로 교체 (4 family + 1 unknown)
-  - Adam LR=1e-3, 10 epoch, batch 64, label smoothing 0.05
-  - val accuracy + per-class confusion matrix
-  - ONNX export (opset 13 단일 파일)
+1. **D.3 — 작성 완료** (2026-05-19, `python/prep_transfer_dataset.py`):
+   ```bash
+   python python/prep_transfer_dataset.py \
+     --pids 김건형 김범수 성재용 박지훈 \
+     --out data/transfer/family_v1.npz
+   ```
+   → 5-class 데이터셋 (4 family + 1 unknown, noise 병합). 라벨 0~3=family, 4=unknown.
+2. **D.4 — TODO** `notebooks/transfer_family_v1.ipynb`:
+   - v3 backbone (`mobilenet_v3_large_v3.onnx` 의 PyTorch 버전 또는 v3 best.pth) 로드
+   - backbone 전체 freeze, classifier[3] 1280→5 로 교체
+   - Adam LR=1e-3, 10 epoch, batch 64, label smoothing 0.05
+   - **unknown 다운샘플 또는 class-weight**: VIBeID P14 ~2469 vs family 인당 ~300 → unknown ~500 으로 다운샘플 추천
+   - val accuracy + per-class confusion matrix
+   - ONNX export (opset 13 단일 파일)
 
 ### Phase 4 — 배포 + 라이브 검증 (~30분)
 1. `weights/mobilenet_v3_family_v1.onnx` Jetson 으로 scp: `scp E:/Terra/weights/mobilenet_v3_family_v1.onnx snup2@snup2-desktop:~/terra/`
 2. Jetson 에서 `trtexec --onnx=mobilenet_v3_family_v1.onnx --fp16 --saveEngine=mnv3_family_v1_fp16.plan --workspace=512`.
-3. `python/web/people.json` 편집: `{0: {name: "나", emoji: "🧑"}, 1: {name: "엄마", emoji: "👩"}, ...}`.
-4. `web_server.py` model 경로 갱신 (또는 CLI flag), unknown threshold 적용 (max-prob < 0.7 → "unknown" 표시).
+3. `python/web/people.json` 이미 작성됨 (label 0~4 매핑). 가족 모이는 날 전 emoji 등 취향대로 수정.
+4. `web_server.py` model 경로 갱신 (`--plan mnv3_family_v1_fp16.plan` 또는 환경변수 `TERRA_TRT_PLAN`), unknown threshold 적용 (max-prob < 0.7 → "unknown" 표시 — TODO).
 5. 가족 한 명씩 라이브 시연.
 
 ### 미리 작성하면 좋은 것 (오늘 밤 / 내일 아침)
-- `python/prep_transfer_dataset.py` 골격
+- ~~`python/prep_transfer_dataset.py` 골격~~ 완료 (2026-05-19)
+- ~~`python/web/people.json` 가족 이름 채워두기~~ 완료 (2026-05-19)
 - `notebooks/transfer_family_v1.ipynb` 골격
-- `python/web/people.json` 가족 이름 채워두기
+- (선택) Phase 0 양말 진폭 검증 직접 해보기
+
+### ⚠️ 개인정보 주의
+- pid = 실명 (`김건형` 등) → `data/recordings/<pid>/...` 폴더에 박힘. `data/` 는 .gitignore (이미 untracked) 라 push 안 됨.
+- `python/web/people.json` 의 display name 도 실명 → public repo 에 push 시 노출. 푸시 전 익명화하거나 .gitignore 추가 권장. 현재 GitHub 미러는 `snup2e/jongsul_jetson` PUBLIC.
 
 ### S.7 ~ S.10
 | # | 작업 | 의존 |
@@ -91,6 +127,27 @@ python3 record_session.py --pid mom --session 3 --duration 300 --outdir data/rec
 
 ### 폴백
 - 만약 향후 USB/전원 이슈 재발 → Jetson-direct ADS1256 (`python/ads1256_source.py`, `ads1256_bench.py`, `resample_for_ads1256.py` 16/15) 자산 그대로 활용 (USB 안 거치니 전원 이슈 무관)
+
+---
+
+## 알려진 이슈 — SNR 가 ADC 성능 대비 낮음 (2026-05-12 발견, S.10 전 해결 권장)
+
+**증상**: 1m 안쪽 발걸음 SNR **19~23 dB** (peak idle 0.78% FS ≈ 0.5~1 mV RMS vs hard stomp 11% FS). SM-24 + ADS1256 PGA=16 셋업이면 40+ dB 기대치. ADC 자체 floor (5 µVrms = 0.0016% FS) 대비 측정 noise 가 **수백 배 큼** → 어딘가에서 노이즈가 새고 있음.
+
+**원인 우선순위 (가설)**:
+1. **BUFEN=0 switched-cap 입력 부작용** — PGA=16 에서 effective Zin ~16 kΩ, source impedance 비대칭 + sampling cap charge injection 으로 differential noise 증폭. seismometer.info / Seisberry 등 표준 셋업은 **BUFEN=1**. floating 코일이 self-bias 로 mid-rail 안착하므로 BUFEN=1 의 common-mode 제약 (AGND~AVDD-2V) 위반 안 함.
+2. **케이블 EMI 픽업** — 지오폰 → vctec 보드 리드가 shielded twisted pair 가 아니면 50 Hz / harmonic 픽업.
+3. **AVDD ripple** — STM32 USB 전원 quirk (SSD hub brownout) 의 연장선. AVDD PSRR 한계.
+
+**진단 순서** (S.7 또는 S.10 전):
+1. **Short-input 테스트** (5분, 원인 절반 가르기): 지오폰 떼고 AIN0/AIN1 점퍼로 short → 30초 캡처. 노이즈 µV 급으로 떨어지면 환경/케이블 원인, 여전히 mV 급이면 전기 원인 (BUFEN/PGA/AVDD).
+2. **Idle FFT**: 30초 캡처 → `numpy.fft`. **50 Hz + harmonic 스파이크** → EMI, **1/f rising** → PGA flicker / BUFEN, **broadband flat** → BUFEN/AVDD, **SPI clock 주변 톤** → 디지털 크로스토크.
+3. **BUFEN=1 시도**: ads1256.c init 시퀀스의 STATUS WREG 에서 BUFEN 비트 토글, 다른 변경 없음. 노이즈 5~10배 감소 기대.
+4. (필요 시) shielded twisted pair, AVDD 디커플링 (ferrite + 추가 10µF/100nF), STM32 USB 분리 전원.
+
+**현재 영향 평가**: 가족 transfer 학습 (S.8~S.9) 은 noise 분포 포함해서 학습되므로 라이브 시연에 결정적 영향 없음. 하지만 종설 (S.10) 발표용 정확도/시연 영상 품질을 위해 한 번 잡고 가는 게 좋음.
+
+⚠️ **990Ω 댐핑은 원인 아님**. 션트 바꿔봤자 신호/노이즈 같은 비율로 변함 (오히려 션트 낮추면 신호만 줄어 SNR 악화). VIBeID 학습 분포 미스매치 위험까지 있으니 **댐핑은 건드리지 말 것**.
 
 ---
 
@@ -219,7 +276,7 @@ E:\STM32CubeIDE\workspace\jetson_bridge\    # 실제 CubeIDE 프로젝트 위치
 ## 추론 파이프라인 (확정, 깨지 말 것)
 ```
 raw .mat (8 kHz)
-  → extract.apply_frozen_gmm(geo, gmm_params.npz)   # P14 학습 frozen GMM
+  → extract.apply_envelope_detector(geo)            # Hilbert env + peak align (2026-05-12+)
   → footsteps (M, 1500) float64
   → cwt_fast.cwt(sig)                               # FFT + cached freq-domain wavelets
   → render_lut.cwt_to_rgb_direct(coeffs, (224,224)) # npy LUT + cv2.resize
@@ -227,7 +284,27 @@ raw .mat (8 kHz)
   → top-1 → multi-presence Voter (K=10/M=3, K_MAX=12)
   → SSE → 웹 대시보드
 ```
-- per-footstep budget: **700 ms** (보통 걸음 1.5 Hz → 660 ms 간격, 큐 누적 방지). 현재 약 400 ms (추출 42 + 렌더 336 + TRT 23) — 1.7× 마진.
+- per-footstep budget: **700 ms** (보통 걸음 1.5 Hz → 660 ms 간격, 큐 누적 방지).
+- Windows 노트북 실측 (2026-05-19, P14): **34 ms** (추출 1 + 렌더 34 = cwt 22 + norm 4 + LUT 5 + resize 2). 원본 57 ms 대비 **1.7× 감소**. 두 변경 적용 (둘 다 bit-exact 검증 P14/P50/P100 × 50샘플 0/50 mismatch):
+  - `cwt_fast.py`: fft/ifft 풀-complex → **scipy.fft.rfft/irfft (workers=-1)** (signal+morl 둘 다 실수). 노트북에선 numpy 1.20+ 와 동일 backend 라 효과 0 이지만 ARM 다중 코어에서 추가 윈 가능성, 코드 fallback 으로 numpy 도 지원.
+  - `cwt_fast.py`: per-scale Python loop 256-iter → `_build_caches` 에서 pre-built `(row_idx, col_idx_A/B)` 인덱스로 **fancy-indexing 1회 추출 + in-place subtract/multiply** 로 벡터화. 추가 1.05~1.08× 깎음 + 매 호출 allocation 감소.
+- Jetson 재측정 필요 (이전 336 ms 렌더 추정치 → 약 200 ms 로 감소 기대, TRT 23 더해 per-footstep ~265 ms = 2.6× 마진).
+- 회귀 검증: `python python/bench_cwt_vec.py [mat]` 가 legacy per-scale loop 과 비교 (bit-exact + speedup). `python python/bench_preprocess.py [mat]` 가 단계별 시간.
+
+### Detector 교체 기록 (2026-05-12)
+- **이전**: `apply_frozen_gmm(geo, gmm_params.npz)` — P14 100s 학습 frozen GMM (7-feature, 0.35s window, K=2)
+- **현재**: `apply_envelope_detector(geo)` — Hilbert envelope + adaptive MAD threshold + peak align (k_mad=8, env_smooth=30ms, min_sep=120ms, align_radius=30ms)
+- **검증** (P14 1~6, 30분, v2 분류기):
+  - GMM: 2190 crops, **83.38%** acc
+  - Envelope: 2469 crops (+12.7%), **84.89%** acc (+1.5pp)
+  - matched 부분 (둘 다 검출, 2004 crops): 86.53% — peak 위치 byte-거의-동일 (median Δ 0~2 샘플)
+  - GMM-only (186 crops): 50.54% — GMM 의 weak/노이즈성 검출, envelope 가 합리적으로 제외
+  - env-only (465 crops): 77.85% — GMM 이 놓친 진짜 발걸음
+- **이유**: 우리 STM32 30s 캡처에서 GMM 이 dense burst miss (5~9s 의 10+ peak 중 3~4만) + quiet 구간 FP (13~14s 의 ≈0 신호에 detection 2개). envelope 가 둘 다 해결.
+- **분류기 재학습 불필요**: matched crops 의 정확도가 GMM baseline 보다 높아 학습-추론 분포 일치 유지됨.
+- **stream.py** `raw_to_inputs(geo)` 기본값 envelope, `detector="gmm"` 로 legacy GMM 호출 가능 (validation 스크립트용).
+- **Jetson 배포는 D.3 작업과 함께**: `python/extract.py` + `python/stream.py` scp 갱신 + 다른 envelope detector caller 없음 (jetson_realtime.py 도 stream.raw_to_inputs 경유).
+- **실험 자산**: `python/experiment_*` (variants, P14 분류기 비교, 30s 시각 비교), `중간발표/figures/expt_*.png`.
 
 ---
 
