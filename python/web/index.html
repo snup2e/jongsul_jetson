@@ -106,6 +106,27 @@
     transition: background .3s;
   }
   .person.recent .status-dot { background: var(--green); }
+  /* manual remove (X) — for demo re-takes; clears card + radar dot */
+  .person .remove-btn {
+    position: absolute; top: -3px; left: -3px;
+    width: 18px; height: 18px; padding: 0; border: none;
+    border-radius: 50%; cursor: pointer;
+    background: rgba(0,0,0,0.42); color: #fff;
+    font-size: 13px; line-height: 1; font-weight: 700;
+    display: grid; place-items: center;
+    box-shadow: 0 0 0 2px var(--card);
+    opacity: .55; transition: opacity .15s, background .15s, transform .1s;
+  }
+  .person:hover .remove-btn { opacity: 1; }
+  .person .remove-btn:hover { background: #FF4D4F; transform: scale(1.12); }
+  .person .remove-btn:active { transform: scale(.92); }
+  /* clear-all link in hero header */
+  .hero .clear-all {
+    margin-top: 10px; border: none; background: none; cursor: pointer;
+    color: var(--text-3); font-size: 12px; font-weight: 600;
+    padding: 4px 8px; border-radius: 8px;
+  }
+  .hero .clear-all:hover { background: #F2F4F6; color: var(--text-2); }
   .person .name {
     font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: -.01em;
   }
@@ -340,6 +361,7 @@
       <div class="em">🌙</div>
       <div class="t">지금은 집이 비어 있어요</div>
     </div>
+    <button id="clear-all" class="clear-all" type="button" style="display:none;">✕ 모두 지우기</button>
   </section>
 
    </div><!-- /.col-left -->
@@ -429,12 +451,18 @@
         const c = colorFor(p.person_id);
         el.innerHTML = `
           <div class="avatar" style="--avatar-bg:${c};--avatar-c:${c};">
+            <button class="remove-btn" type="button" title="제거" aria-label="제거">×</button>
             ${p.emoji}
             <span class="status-dot"></span>
           </div>
           <div class="name">${escapeHtml(p.name)}</div>
           <div class="meta"></div>
         `;
+        const pid = p.person_id;
+        el.querySelector('.remove-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          removePerson(pid);
+        });
         grid.appendChild(el);
       }
       // in-place updates (no DOM destruction, no animation restart)
@@ -443,6 +471,29 @@
       if (meta.textContent !== text) meta.textContent = text;
       el.classList.toggle('recent', recent);
     }
+
+    // clear-all visibility
+    const ca = $('clear-all');
+    if (ca) ca.style.display = list.length ? 'inline-block' : 'none';
+  }
+
+  // ── Manual removal (demo re-takes) ─────────────────────
+  // Clears a person from the present grid AND the radar. The server still
+  // considers them present until away-timeout, but inference events only
+  // resurrect a pid that still has a radar dot, so the card stays gone
+  // until they physically re-enter (away → fresh confirm).
+  function removePerson(pid) {
+    state.present.delete(pid);
+    removeRadarDot(pid);
+    renderGrid();
+  }
+
+  function clearAllPresent() {
+    for (const pid of Array.from(state.present.keys())) {
+      state.present.delete(pid);
+      removeRadarDot(pid);
+    }
+    renderGrid();
   }
 
   // ── Render: feed ────────────────────────────────────────
@@ -687,6 +738,9 @@
     };
   }
   connect();
+
+  // clear-all button (demo re-takes)
+  $('clear-all').addEventListener('click', clearAllPresent);
 
   // refresh "X초/분 전" labels every 5s
   setInterval(renderGrid, 5000);

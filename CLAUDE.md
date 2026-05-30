@@ -2,14 +2,23 @@
 
 > **Scope of this file**: 앞으로 할 일 + 절대 깨면 안 되는 원칙만. 완료된 단계의 검증 수치 / VIBeID 데이터셋 전체 구조 / MATLAB 파이프라인 정밀 사양 / 트랙 A·B 결과 상세는 → **`CLAUDE_ARCHIVE.md`** 참조.
 
-## 현재 상태 (2026-05-11)
+## 현재 상태 (2026-05-30) — **S.8 / S.9 완료, 시연 영상 촬영 완료. 남은 건 S.10 발표자료 마무리.**
 - **S.1 ~ S.6 모두 PASS** (S.6 SEQ drop 이슈 해결 — STM32 USB 포트 변경)
-- **D.2 PASS** — `record_session.py` 5분 sustained capture 검증: 4500352 samples @ 15000.4 sps, frames_ok=70318, drops/resets/CRC/N 모두 0, 18 MB/세션. 본인 dry-run 1세션 완료 (footsteps detected: 71).
-- Stage 1~5d + 다중 인원 voter (5e) + 웹 대시보드 (7) + Track A (v3 backbone) + Track B (multi-presence 검증) + Track C (STM32 bridge skeleton) **모두 PASS**
-- raw geophone → STM32 ADS1256 → polyphase 8 kHz → CWT → TRT FP16 → top-1 → voter → SSE → 웹 대시보드 **end-to-end 라이브 작동 확인** (본인 발걸음 → count 증가).
-- v2 검증 P14/P50/P100/P2 = 93~97%, v3 P14 = 86.7% (170-class trade-off), per-footstep 386 ms
-- 마감 2026-06. 남은 트랙: **2026-05-11 가족 4명 수집** (S.8) → S.9 transfer → S.10 종설 발표.
-- GitHub: `snup2e/jongsul_jetson` (PUBLIC, weights+paper 포함, data/.mat 제외)
+- **D.2 PASS** — `record_session.py` 5분 sustained capture 검증.
+- **D.3 PASS** — `prep_transfer_dataset.py`, 5-class (4 family + 1 unknown).
+- **S.8 (가족 수집) 완료 (2026-05-30)** — 4명 × 3세션(페이스 평상/천천히/빠르게) × 5분 + noise 1세션. **집 wood floor** (강의실 페인트시멘트는 맨발 진폭 처참해서 본가로 이동, peak 30~120mV로 10~20배 회복). 무결성 전부 PASS. crops: F1 999 / F2 914 / F3 1227 / F4 1183 / unknown 2808.
+- **S.9 (transfer + 배포) 완료 (2026-05-30)** — `notebooks/transfer_family_v1.ipynb`. v3 frozen backbone, **5-class val 86.0%**, family→unknown 누수 0, unknown recall 97%. `mobilenet_v3_family_v1.onnx` (16.8MB, dynamo=False export) → Jetson `mnv3_family_v1_fp16.plan` (TRT 11.6ms) → `web_server.py --stm32`로 **가족 라이브 시연 + 영상 촬영 완료**. (v2 백본 비교도 돌려봤으나 v3 채택.)
+- raw geophone → STM32 ADS1256 → polyphase 8 kHz → CWT → TRT FP16 → top-1 → voter → SSE → 웹 대시보드 **end-to-end 라이브 작동**.
+- **S.10 TODO** — 종설 발표자료 (시연 영상 ✅ + accuracy table[val confusion 활용] + 시스템 다이어그램).
+- GitHub: `snup2e/jongsul_jetson` (PUBLIC, weights+paper 포함, data/.npz/.mat 제외).
+- ⚠️ **개인정보**: `python/web/people.json` 실명 — 이미 public repo 에 노출됨 (이전 커밋부터). 완성본 노트북(루트 `transfer_family_v1.ipynb`)은 출력에 실명 있어 **커밋 제외**. 발표 후 익명화/history rewrite 고려.
+
+### 2026-05-20 가족 모임 무산 + 진단 결과
+- 비로 가족이 집에 못 모임 → **수집·시연 컨텍스트 강의실로 확정** (2026-05-19 의 "집 현관" 결정 오버라이드).
+- 양말 세션 (S2) 폐기. within-person 분산은 **페이스 3가지** 로 대체: S1=평상, S2=천천히, S3=빠르게.
+- record_session 30s + 5min presanity 캡처 진행. 5min 결과 sps=15002, frames_ok=70325, samples=4,500,800, footsteps=204 — **데이터 완전 무결**.
+- 발견: **Linux cdc_acm + ST-Link VCP 의 SEQ counter false-positive quirk**. Windows 베이스라인 drops=0 였던 게 Jetson 에서 30s 캡처 한 번에 drops=29887 (그러나 sample count 는 정확). 5min 캡처에선 drops=0. 첫 USB connect 직후 buffer transient 가 원인 추정. → `record_session.py` PASS 기준을 sample-count + sps 기반으로 패치 (seq_drops/resets 는 informational, reset rate ≥ 1/min 만 fail).
+- Phase 2 (가족 수집) 는 **2026-05-21 으로 연기**.
 
 ### 하드웨어 식별 (확정)
 - **ADC 모듈**: vctec.co.kr 8채널 24비트 ADC 보드 (상품코드 P000BATS) — 칩 ADS1256IDB (TI 정품 SSOP-28), 7.68 MHz 크리스탈, 정밀 voltage reference IC 내장 (SOIC-8), AVDD/DVDD LDO 분리 (SOT-223). PCB는 Waveshare High-Precision AD/DA Board ADC 부분과 회로 거의 동일.
@@ -37,7 +46,7 @@
 
 ## 다음에 할 일 — **가족 4명 모이는 날 plan** (날짜 미정, 총 ~1.5~2시간)
 
-> 도메인 다양성 포기 결정 (2026-05-19): "집 현관에 설치된 시스템" 으로 시연 컨텍스트 고정. 신발+양말 두 조건만 within-person 분산 (3세션 × 5분/인). pids = `김건형, 김범수, 성재용, 박지훈`, noise 는 unknown 에 병합 (5-class).
+> 도메인 다양성 포기 결정 (2026-05-19): "집 현관에 설치된 시스템" 으로 시연 컨텍스트 고정. 신발+양말 두 조건만 within-person 분산 (3세션 × 5분/인). pids = `F1, F2, F3, F4`, noise 는 unknown 에 병합 (5-class).
 
 ### Phase 0 — 사전 (가족 모이기 1~3일 전, 본인만, ~15분)
 1. **30초 sanity** (전체 시스템 검증):
@@ -63,17 +72,18 @@
 4명 × 3세션 × 5분.
 ```bash
 # pid 별로 신발 갈아신기 사이클 — 1명씩 끝내고 다음 사람
-python3 record_session.py --pid 김건형 --session 1 --duration 300 --outdir data/recordings  # 신발 평상
-python3 record_session.py --pid 김건형 --session 2 --duration 300 --outdir data/recordings  # 양말 평상
-python3 record_session.py --pid 김건형 --session 3 --duration 300 --outdir data/recordings  # 신발 다른 페이스
-# 김범수, 성재용, 박지훈 도 동일 3세션
+python3 record_session.py --pid F1 --session 1 --duration 300 --outdir data/recordings  # 신발 평상
+python3 record_session.py --pid F1 --session 2 --duration 300 --outdir data/recordings  # 양말 평상
+python3 record_session.py --pid F1 --session 3 --duration 300 --outdir data/recordings  # 신발 다른 페이스
+# F2, F3, F4 도 동일 3세션
 ```
 세션마다 footsteps detected 확인 (50~250 범위면 OK). < 30 인 세션은 그 세션만 재수집.
 
 **조건 매핑** (세션 번호 → 조건, 노트로만 관리, 모델 라벨은 사람 1개로):
-- S1: 평소 신는 신발, 평상 페이스
-- S2: 양말 (Phase 0 에서 검증된 경우만), 평상 페이스
-- S3: 신발 같은 종류 다른 페이스 (S1 보다 약간 빨리 또는 천천히)
+- S1: 평상 페이스
+- S2: 천천히 (평소보다 약간 느리게, 의식 안 할 정도)
+- S3: 빠르게 (약간 서두르듯)
+- (2026-05-20: 양말 세션 폐기, 강의실 컨텍스트 → 페이스로 within-person 분산)
 
 **Noise 세션** (마지막, 본인이 진행, ~5~10분):
 ```bash
@@ -82,13 +92,13 @@ python3 record_session.py --pid noise --session 1 --duration 300 --outdir data/r
 의도적 비-발걸음 임펄스 (분당 10~20회 분산):
 - 문 닫기 (~10회) / 책/펜 떨어뜨리기 (~10회) / 의자 끌기 / 책상·벽 두드리기 / 진공청소기 30초
 
-→ D.3 에서 `--noise-pid noise` 가 unknown 으로 병합. CNN 의 OOD overconfidence (door slam → "김건형 confidence 0.9" 등) 차단.
+→ D.3 에서 `--noise-pid noise` 가 unknown 으로 병합. CNN 의 OOD overconfidence (door slam → "F1 confidence 0.9" 등) 차단.
 
 ### Phase 3 — 데이터 prep + transfer 학습 (~20분)
 1. **D.3 — 작성 완료** (2026-05-19, `python/prep_transfer_dataset.py`):
    ```bash
    python python/prep_transfer_dataset.py \
-     --pids 김건형 김범수 성재용 박지훈 \
+     --pids F1 F2 F3 F4 \
      --out data/transfer/family_v1.npz
    ```
    → 5-class 데이터셋 (4 family + 1 unknown, noise 병합). 라벨 0~3=family, 4=unknown.
@@ -114,7 +124,7 @@ python3 record_session.py --pid noise --session 1 --duration 300 --outdir data/r
 - (선택) Phase 0 양말 진폭 검증 직접 해보기
 
 ### ⚠️ 개인정보 주의
-- pid = 실명 (`김건형` 등) → `data/recordings/<pid>/...` 폴더에 박힘. `data/` 는 .gitignore (이미 untracked) 라 push 안 됨.
+- pid = 실명 (`F1` 등) → `data/recordings/<pid>/...` 폴더에 박힘. `data/` 는 .gitignore (이미 untracked) 라 push 안 됨.
 - `python/web/people.json` 의 display name 도 실명 → public repo 에 push 시 노출. 푸시 전 익명화하거나 .gitignore 추가 권장. 현재 GitHub 미러는 `snup2e/jongsul_jetson` PUBLIC.
 
 ### S.7 ~ S.10
@@ -148,6 +158,28 @@ python3 record_session.py --pid noise --session 1 --duration 300 --outdir data/r
 **현재 영향 평가**: 가족 transfer 학습 (S.8~S.9) 은 noise 분포 포함해서 학습되므로 라이브 시연에 결정적 영향 없음. 하지만 종설 (S.10) 발표용 정확도/시연 영상 품질을 위해 한 번 잡고 가는 게 좋음.
 
 ⚠️ **990Ω 댐핑은 원인 아님**. 션트 바꿔봤자 신호/노이즈 같은 비율로 변함 (오히려 션트 낮추면 신호만 줄어 SNR 악화). VIBeID 학습 분포 미스매치 위험까지 있으니 **댐핑은 건드리지 말 것**.
+
+---
+
+## 알려진 이슈 — Linux cdc_acm SEQ counter false-positive (2026-05-20)
+
+**증상**: `STM32Source` 의 SEQ delta 카운터 (`seq_drops`, `resets`) 가 Jetson Linux cdc_acm 에서 false-positive 발생.
+- 30초 캡처: `seq_drops=29887, resets=1` 인데 samples=450,304 (= 30s × 15000 sps, 정확). 30 초 outlier — 첫 USB connect 직후 buffer transient 가능.
+- 5분 캡처: `seq_drops=0, resets=1` + sample count 정확 (4,500,800). reset 1 = 짧은 brownout ~4ms 또는 USB enumeration jump 추정. 발걸음 분류 영향 0.
+- Windows 베이스라인 (S.2/S.3 검증): 30s drops=0, resets=0 — 같은 펌웨어로 깨끗.
+
+**검증 끝남 (펌웨어 + parser 코드)**:
+- main.c line 108-140: `seq++` 매 frame 정확히 +1, 다른 path 에서 안 건드림.
+- stm32_source.py:198-206: SEQ delta + wraparound + reset(gap>32768) 로직 합리적.
+- 즉 펌웨어/parser 코드 버그 없음. Linux cdc_acm + ST-Link VCP 의 USB endpoint chunking quirk 로 추정 (정확한 root cause 는 usbmon 필요).
+
+**대응**: `record_session.py` PASS 기준을 sample-count + sps 기반으로 패치 (2026-05-20):
+- ✅ sps_ratio 0.995~1.005 (±0.5%)
+- ✅ err_ratio < 0.001 (CRC/N)
+- ✅ reset_rate_per_min ≤ 1.0 (짧은 brownout 허용)
+- ❌ seq_drops 조건 제거 (false-positive)
+
+**S.10 발표 전 cleanup**: usbmon dump 떠서 진짜 root cause 잡으면 좋음. 지금은 진행에 지장 없음.
 
 ---
 

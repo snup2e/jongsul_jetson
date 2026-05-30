@@ -162,16 +162,23 @@ def record(pid, session, duration, port, baud, fs_in, outdir, gmm_path, skip_det
     sz_mb = os.path.getsize(fpath) / 1e6
     print("  saved -> {}  ({:.1f} MB)".format(fpath, sz_mb))
 
-    # PASS = 신호 받음 + 진짜 frame loss 없음.
-    # CRC/N 단발 (USB CDC 재연결 boundary 1-2 frame) 은 무해.
-    # 0.1% 이하 (= 7000 frames 기준 7개 이하) 까지 허용.
+    # PASS = 데이터 무결성 직접 검증 (sample count 기준).
+    # SEQ drops + resets counter 는 Linux cdc_acm + ST-Link VCP 조합에서
+    # false-positive 가 빈번. 매우 짧은 STM32 brownout (1 frame ≈ 4 ms 손실)
+    # 도 reset 으로 카운트되지만 sample count 가 맞으면 발걸음 분류 영향 0.
+    # 진짜 fail 은 sample count 가 어긋날 때 (sps_ratio 밖) 또는 reset 다발
+    # (≥ 1/min) — 후자는 USB power 불안정 신호.
     bad_total = s["frames_bad_crc"] + s["frames_bad_n"]
     err_ratio = bad_total / max(s["frames_ok"], 1)
+    actual_sps = len(raw) / max(elapsed, 1e-9)
+    sps_ratio = actual_sps / fs_in
+    reset_rate_per_min = s["resets"] / max(elapsed / 60.0, 1e-9)
     pass_ = (
         not stopped_early
         and s["frames_ok"] > 100
-        and s["seq_drops"] == 0
         and err_ratio < 0.001
+        and 0.995 <= sps_ratio <= 1.005    # ±0.5% sample-count 무결
+        and reset_rate_per_min <= 1.0       # 분당 1번 이하 reset (=짧은 brownout 허용)
     )
     print()
     if stopped_early:

@@ -44,10 +44,16 @@ from flask import Flask, Response, jsonify, send_from_directory, stream_with_con
 class EventBroker:
     """Thread-safe fan-out of events to every connected SSE client."""
 
-    def __init__(self):
+    def __init__(self, log_path=None):
         self._clients = []  # list of queue.Queue
         self._lock = threading.Lock()
         self._history = deque(maxlen=200)  # recent events for /state replay
+        # Optional JSONL event log — one event per line (inference/confirm/away/stats).
+        # Captures the full inference trace of a demo session.
+        self._log = None
+        if log_path:
+            self._log = open(log_path, "a", encoding="utf-8")
+            print("[broker] logging events -> {}".format(log_path))
 
     def subscribe(self):
         q = queue_mod.Queue(maxsize=256)
@@ -64,6 +70,12 @@ class EventBroker:
 
     def publish(self, event):
         self._history.append(event)
+        if self._log is not None:
+            try:
+                self._log.write(json.dumps(event, ensure_ascii=False) + "\n")
+                self._log.flush()
+            except Exception as e:
+                print("[broker] log write failed: {}".format(e))
         with self._lock:
             dead = []
             for q in self._clients:
@@ -453,6 +465,9 @@ def main():
                     help="Seconds without footsteps before person → away")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--log-events", default=None,
+                    help="Append all events (inference/confirm/away/stats) as JSONL to this path. "
+                         "Captures the full inference trace of a demo session.")
     args = ap.parse_args()
 
     if not (args.replay or args.demo or args.stm32):
@@ -466,7 +481,7 @@ def main():
     if args.test_pin_pid is not None:
         print("[test-mode] pinning all events to person_id={}".format(args.test_pin_pid))
 
-    broker = EventBroker()
+    broker = EventBroker(log_path=args.log_events)
     people = load_people_map()
 
     # Voter is shared between consumer thread (calls .update) and presence
