@@ -43,3 +43,17 @@ python/*.log
 *.swp
 *~
 *.tmp
+
+# ── Presentation decks + media (kept local, not in code repo) ──
+중간발표/
+기말발표/
+기말발표_배포/
+최종발표/
+최종발표_배포/
+*.mp4
+*.zip
+*.pptx
+*.ppt
+# ── Root working-copy notebooks (real-name outputs / dup of notebooks/) ──
+/transfer_family_v*.ipynb
+종설 figure*

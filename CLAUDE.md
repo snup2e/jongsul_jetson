@@ -2,14 +2,16 @@
 
 > **Scope of this file**: 앞으로 할 일 + 절대 깨면 안 되는 원칙만. 완료된 단계의 검증 수치 / VIBeID 데이터셋 전체 구조 / MATLAB 파이프라인 정밀 사양 / 트랙 A·B 결과 상세는 → **`CLAUDE_ARCHIVE.md`** 참조.
 
-## 현재 상태 (2026-05-30) — **S.8 / S.9 완료, 시연 영상 촬영 완료. 남은 건 S.10 발표자료 마무리.**
+## 현재 상태 (2026-06-09) — **프로젝트 완료.** S.1~S.9 + 평가 split 재정립(test 84.5%) + S.10 발표자료(최종 PPT·강의실 HTML 배포) 모두 완료.
 - **S.1 ~ S.6 모두 PASS** (S.6 SEQ drop 이슈 해결 — STM32 USB 포트 변경)
 - **D.2 PASS** — `record_session.py` 5분 sustained capture 검증.
 - **D.3 PASS** — `prep_transfer_dataset.py`, 5-class (4 family + 1 unknown).
 - **S.8 (가족 수집) 완료 (2026-05-30)** — 4명 × 3세션(페이스 평상/천천히/빠르게) × 5분 + noise 1세션. **집 wood floor** (강의실 페인트시멘트는 맨발 진폭 처참해서 본가로 이동, peak 30~120mV로 10~20배 회복). 무결성 전부 PASS. crops: F1 999 / F2 914 / F3 1227 / F4 1183 / unknown 2808.
 - **S.9 (transfer + 배포) 완료 (2026-05-30)** — `notebooks/transfer_family_v1.ipynb`. v3 frozen backbone, **5-class val 86.0%**, family→unknown 누수 0, unknown recall 97%. `mobilenet_v3_family_v1.onnx` (16.8MB, dynamo=False export) → Jetson `mnv3_family_v1_fp16.plan` (TRT 11.6ms) → `web_server.py --stm32`로 **가족 라이브 시연 + 영상 촬영 완료**. (v2 백본 비교도 돌려봤으나 v3 채택.)
+  - ⚠️ **평가 split 수정 (2026-06-09)**: 기존 `val 86.0%`는 per-footstep **무작위** 80:20 split이라 같은 녹음 인접 발걸음이 train/val에 섞인 **leakage 낙관 편향**. `prep_transfer_dataset.py`를 **페이스(세션)별 시간분할 train70/val15/test15 + gap3**으로 재작성(누수 제거, test 세트 신설), 노트북에 held-out test 평가 셀 추가. 새 `data/transfer/family_v1.npz`(train4934/val1012/test1071) 생성·구버전=`family_v1_oldsplit.npz`. **재학습 결과 (2026-06-09, v3 백본):** per-footstep **val 87.35% / TEST 84.50%** (held-out, 누수 없음). 격차 ~3%p → 일반화 양호, 옛 leaky 86%는 ~1.5%p 부풀림뿐. unknown recall test 0.98. test per-class recall: 김건형0.83·김범수0.74·성재용0.76·박지훈0.71. **발표 헤드라인 정확도 = test 84.5% 권장.** 슬라이드 갱신 TODO(86%→test, confusion=test). 상세=memory `project_eval_split_fix`.
 - raw geophone → STM32 ADS1256 → polyphase 8 kHz → CWT → TRT FP16 → top-1 → voter → SSE → 웹 대시보드 **end-to-end 라이브 작동**.
-- **S.10 TODO** — 종설 발표자료 (시연 영상 ✅ + accuracy table[val confusion 활용] + 시스템 다이어그램).
+- **S.10 발표자료 완료 (2026-06-09)** — 시연 영상 + 정확도(test confusion 84.5%) + 시스템 다이어그램. 최종 덱=HTML 캡처 이미지 PPT([[project_final_pptx_done]]) + 강의실용 `최종발표_배포/`. 평가 split 재정립=[[project_eval_split_fix]](test 84.5%/val 87.4%/voter ≈92%), 지연 264ms 실측=[[project_latency_remeasure_done]].
+  - **최종 PPT + 최종 포스터 초안 완성, 품질 미달 → 재작업 예정** (2026-06-08). 핸드오프 = `최종발표/최종본_TODO.md`. 포스터는 학과 **공식 양식 그대로 내용만** 채울 것. 시작 전 사용자에게 방향 먼저 확인.
 - GitHub: `snup2e/jongsul_jetson` (PUBLIC, weights+paper 포함, data/.npz/.mat 제외).
 - ⚠️ **개인정보**: `python/web/people.json` 실명 — 이미 public repo 에 노출됨 (이전 커밋부터). 완성본 노트북(루트 `transfer_family_v1.ipynb`)은 출력에 실명 있어 **커밋 제외**. 발표 후 익명화/history rewrite 고려.
 
@@ -320,8 +322,46 @@ raw .mat (8 kHz)
 - Windows 노트북 실측 (2026-05-19, P14): **34 ms** (추출 1 + 렌더 34 = cwt 22 + norm 4 + LUT 5 + resize 2). 원본 57 ms 대비 **1.7× 감소**. 두 변경 적용 (둘 다 bit-exact 검증 P14/P50/P100 × 50샘플 0/50 mismatch):
   - `cwt_fast.py`: fft/ifft 풀-complex → **scipy.fft.rfft/irfft (workers=-1)** (signal+morl 둘 다 실수). 노트북에선 numpy 1.20+ 와 동일 backend 라 효과 0 이지만 ARM 다중 코어에서 추가 윈 가능성, 코드 fallback 으로 numpy 도 지원.
   - `cwt_fast.py`: per-scale Python loop 256-iter → `_build_caches` 에서 pre-built `(row_idx, col_idx_A/B)` 인덱스로 **fancy-indexing 1회 추출 + in-place subtract/multiply** 로 벡터화. 추가 1.05~1.08× 깎음 + 매 호출 allocation 감소.
-- Jetson 재측정 필요 (이전 336 ms 렌더 추정치 → 약 200 ms 로 감소 기대, TRT 23 더해 per-footstep ~265 ms = 2.6× 마진).
-- 회귀 검증: `python python/bench_cwt_vec.py [mat]` 가 legacy per-scale loop 과 비교 (bit-exact + speedup). `python python/bench_preprocess.py [mat]` 가 단계별 시간.
+- 회귀 검증: `python python/bench_cwt_vec.py [mat]` 가 legacy per-scale loop 과 비교 (bit-exact + speedup). `python python/bench_preprocess.py [mat]` 가 단계별 시간 (Windows 전처리만).
+
+### ✅ Latency Jetson 재측정 완료 (2026-06-09) — 실측 ≈264 ms/걸음
+**`bench_jetson_latency.py` 로 내 녹음(`김건형_s1_20260530_1636.npz`) replay 실측.** 기말/최종 덱의 `≈250 ms` 추정치 → **실측 ≈264 ms** 로 검증·교체 완료. 모든 덱·포스터 단일 출처(Jetson 실측) 로 통일됨.
+
+**실측값 (Jetson, TRT FP16, family plan, MAXN 동적클럭, 120 footsteps median):**
+| 단계 | median | p90 |
+|---|---|---|
+| envelope (추출, amortized) | ~6 ms | — |
+| CWT (cwt_fast) | 181 ms | 281 ms |
+| render (LUT + resize) | 46 ms | 46 ms |
+| normalize | 3.5 ms | 3.6 ms |
+| TRT infer | 25 ms | 43 ms |
+| **END-TO-END / footstep** | **≈264 ms** | — |
+
+여유: 보행 간격 640~970 ms ÷ 264 = **2.4×~3.7×** (실시간). CWT 가 지배적(~181 ms).
+
+**숫자 출처 메모 (질문 대비):**
+- **TRT 25 ms** = 이 실측의 per-footstep TRT (H2D + execute + D2H + sync 포함, 동적클럭). 라이브 파이프라인은 CWT(CPU) 사이사이 GPU 가 idle→downclock 되므로 이 25 ms 가 실제 per-step 기여값.
+- **옛 `TRT 11.6 ms`** (S.9, CLAUDE_ARCHIVE) = execute-only 마이크로벤치(또는 pinned clock) → e2e 예산엔 H2D/D2H/sync 가 빠져 과소. **덱·포스터에서 11.6→25 로 교체함** (혼선 방지).
+- **전처리 34 ms** 는 Windows **노트북** 실측이었음 (Jetson 아님) → 덱에서 제거, Jetson 실측 단계표로 대체.
+- **`≈250 ms`** 는 옛 추정 사슬(`make_final_figures.py:359` "약 250ms")이었고, 실측 264 ms 로 거의 정확했음이 확인됨.
+- `jetson_clocks` **미적용** 상태 측정 (라이브 시연도 `run_family_demo.sh`→`web_server.py` 로 미적용 → 시연 조건과 동일). pinned 하면 더 낮아지나 시연 대표값 아님. passwordless sudo 없어 직접 pin 불가.
+
+**갱신된 발표물 (전부 ≈264 ms / TRT 25 ms · 실측 라벨):**
+- `최종발표/build_pptx.py` → 슬라이드 15(성능요약 카드) + 슬라이드 19(`s_latency` 단계표·비교표·캡션). `종합설계_최종발표.pptx`/`.ppt` 재빌드됨.
+- `기말발표/index.html` + `기말발표_배포/index.html` (동일, 슬라이드 07 성능요약).
+- `기말발표/make_final_figures.py` (`fig_pipeline` 11.6→25, 250→264; orphan figure 라 덱 미사용이나 재생성함).
+- `최종발표/종합설계_포스터.pptx`/`.ppt` (결과 bullet: TRT 11.6 ms → end-to-end ≈264 ms · TRT 25 ms).
+
+**재측정 런북 (조건 바뀌면 재실행):**
+```bash
+# 녹음·스크립트 Jetson 에 복사 (이미 있으면 생략)
+scp E:/Terra/python/bench_jetson_latency.py snup2@snup2-desktop:~/terra/
+scp "E:/Terra/data/recordings/김건형/김건형_s1_20260530_1636.npz" snup2@snup2-desktop:~/terra/data/recordings/김건형/
+# 실행 — OPENBLAS_CORETYPE=ARMV8 필수 (numpy 1.19.5 aarch64 illegal-instruction 회피, 비대화형 ssh 는 .bashrc 미로드)
+ssh snup2@snup2-desktop "cd ~/terra && OPENBLAS_CORETYPE=ARMV8 python3 bench_jetson_latency.py --pid 김건형 --session 1 --plan mnv3_family_v1_fp16.plan"
+```
+- `--rec PATH` 로 파일 직접 지정, `--offset/--dur` 윈도우, `--max-footsteps`(기본 120).
+- ⚠️ `bench_preprocess.py` 는 전처리만(TRT 없음) → Jetson 전체 지연엔 `bench_jetson_latency.py`.
 
 ### Detector 교체 기록 (2026-05-12)
 - **이전**: `apply_frozen_gmm(geo, gmm_params.npz)` — P14 100s 학습 frozen GMM (7-feature, 0.35s window, K=2)
